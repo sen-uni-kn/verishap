@@ -1,0 +1,33 @@
+[project]
+name = "shap-bounds"
+version = "0.0.1"
+description = "Compute certified bounds in SHAP values."
+readme = "README.md"
+authors = [
+    { name = "David Boetius", email = "david.boetius@uni-konstanz.de" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "formalax @ file:///${PROJECT_ROOT}/dependencies/formalax",
+    "jax==0.5.2",
+    "jaxtyping==0.3.2",
+    "numpy==2.3.2",
+    "scipy==1.16.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.8.6,<0.9.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+indent-width = 4
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B", "W", "I", "N", "ICN", "PT", "Q"]
+ignore = ["F722"]  # jax typing
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.format]
+line-ending = "lf"
+docstring-code-format = true

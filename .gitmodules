@@ -1,0 +1,3 @@
+[submodule "formalax"]
+	path = dependencies/formalax
+	url = git@gitlab.inf.uni-konstanz.de:software-and-systems-engineering/research/formalax.git
