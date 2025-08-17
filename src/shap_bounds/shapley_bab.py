@@ -1,20 +1,23 @@
 # Copyright 2025 David Boetius
 import math
 from dataclasses import dataclass
-from re import A
-from typing import Any, Callable, NamedTuple
+from typing import Any, Callable
 
 import jax
 import jax.numpy as jnp
-from formalax import Box, crown, ibp
-from formalax.verify.bab import BranchStore, SimpleBranchStore
-from jaxtyping import Array, Bool, Int, Real
+from formalax import Box, ibp
+from formalax.verify.bab.branch_store import (
+    BranchStore,
+    MaskBranchSelection,
+    SimpleBranchStore,
+)
+from jaxtyping import Array, Int, Real
 from scipy.special import comb
 
 
 @jax.tree_util.register_dataclass
-@dataclass(eq=False, frozen=True, slots=True)
-class BranchData(NamedTuple):
+@dataclass(eq=False, frozen=True)
+class BranchData:
     # contains boolean masks but stored as float
     # for computing gradients
     coalitions: Box[Real[Array, " b *shape"]]
@@ -29,7 +32,7 @@ class BranchData(NamedTuple):
 
 def bound_coalition_weights(
     num_features: int,
-) -> Callable[[Box[Bool[Array, " b *shape"]]], Box[Real[Array, " b"]]]:
+) -> Callable[[Box[Real[Array, " b *shape"]]], Box[Real[Array, " b"]]]:
     """Compute bounds on the weight of a coalition.
 
     Compute bounds on
@@ -41,13 +44,15 @@ def bound_coalition_weights(
     """
 
     # FIXME: exact=True is slow. Use?
-    combs = jnp.array([comb(num_features, i, exact=True) for i in range(num_features)])
-    coalition_weights = 1 / (num_features * combs)
+    combs = [comb(num_features, i, exact=True) for i in range(num_features)]
+    # do this in Python because the integers can be too large for int32
+    coalition_weights = [1 / (num_features * comb) for comb in combs]
+    coalition_weights = jnp.array(coalition_weights)
     mid_size = num_features // 2
     min_coalition_weight = coalition_weights[mid_size]
 
     def bound_coalition_weight(
-        coalitions: Box[Bool[Array, " b *shape"]],
+        coalitions: Box[Real[Array, " b *shape"]],
     ) -> Box[Real[Array, " b"]]:
         # The coalitions set is represented as bounds on the boolean mask.
         # The smallest coalition in the set excludes all features that have
@@ -55,9 +60,9 @@ def bound_coalition_weights(
         # Therefore, summing out the lower bound of the mask gives
         # the size of the smallest coalition.
         # Similarly for the largest coalition.
-        data_axes = tuple(range(1, coalitions.lower.ndim))
-        size_lb = coalitions.lower.sum(axis=data_axes)
-        size_ub = coalitions.upper.sum(axis=data_axes)
+        data_axes = tuple(range(1, coalitions.lower_bound.ndim))
+        size_lb = coalitions.lower_bound.sum(axis=data_axes).astype(jnp.int32)
+        size_ub = coalitions.upper_bound.sum(axis=data_axes).astype(jnp.int32)
 
         lb = jnp.where(
             (size_ub < mid_size),
@@ -91,20 +96,24 @@ def value_difference(
 
     def val_difference(coalition: Real[Array, " b *shape"]):
         """Computes (v(S + {i}) - v(S))."""
-        with_feature = value_fn(x, coalition | include_feature)
+        # these are floats, so we can't use bitwise_or
+        one = jnp.ones_like(coalition)
+        plus_feature = (coalition + include_feature).clip(max=one)
+
+        with_feature = value_fn(x, plus_feature)
         without_feature = value_fn(x, coalition)
-        return with_feature - without_feature
+        return (with_feature - without_feature).squeeze()
 
     return val_difference
 
 
 def shapley_bab(
     value_fn: Callable[
-        [Real[Array, " *shape"], Bool[Array, " b *shape"]], Real[Array, " b"]
+        [Real[Array, " *shape"], Real[Array, " b *shape"]], Real[Array, " b"]
     ],
     x: Real[Array, " *shape"],
     feature: tuple[int, ...],
-    compute_bounds=crown,
+    compute_bounds=ibp,
     fast_compute_bounds=ibp,
     batch_size: int = 1024,
     jit: bool = True,
@@ -134,13 +143,24 @@ def shapley_bab(
         Yields:
             Bound on the Shapley value of the feature.
     """
+    # --------------------------------------------------------------------------
+    # Abbreviations:
+    # - lb: lower bound
+    # - ub: upper bound
+    # - coali: coalition
+    # - coaliw: coalition weight
+    # - val: value
+    # - diff: difference
+    # --------------------------------------------------------------------------
+
     num_features = math.prod(x.shape)
+    data_axes = tuple(range(1, x.ndim + 1))
     # Computes all binomial coefficients up to num_features.
     # This can take a few seconds.
     bound_coali_weights = bound_coalition_weights(num_features)
 
     val_diff = value_difference(value_fn, x, feature)
-    bound_val_diff = compute_bounds(val_diff)
+    bound_val_diff = compute_bounds(jax.vmap(val_diff))
 
     def select(branches: BranchData):
         score = branches.shapley_ub - branches.shapley_lb
@@ -150,25 +170,27 @@ def shapley_bab(
 
     # Compute smears for splitting.
     # Smears are bounds on the gradient of a function.
-    val_diff_grads = jax.vmap(jax.grad(val_diff))
-    compute_smears = fast_compute_bounds(val_diff_grads)
+    # val_diff_grads = jax.vmap(jax.grad(val_diff))
+    # compute_smears = fast_compute_bounds(val_diff_grads)
 
     def split(branches: BranchData):
         """Split branches by including/excluding one feature."""
         coali_lb, coali_ub = branches.coalitions
         num_branches, *in_shape = coali_lb.shape
 
-        grad_lbs, grad_ubs = compute_smears(branches.coalitions)
-        smears = jnp.maximum(jnp.abs(grad_lbs), jnp.abs(grad_ubs))
-        smears = jnp.reshape(smears, (smears.shape[0], -1))
-        # already fixed features have smears of 0
-        split_axis = jnp.argmax(smears, axis=1)
+        # grad_lbs, grad_ubs = compute_smears(branches.coalitions)
+        # smears = jnp.maximum(jnp.abs(grad_lbs), jnp.abs(grad_ubs))
+        # smears = jnp.reshape(smears, (smears.shape[0], -1))
+        # # already fixed features have smears of 0
+        # split_axis = jnp.argmax(smears, axis=1)
 
         coali_lb_ = jnp.reshape(coali_lb, (num_branches, -1))
         coali_ub_ = jnp.reshape(coali_ub, (num_branches, -1))
+        # FIXME: this just splits features in order
+        split_axis = jnp.argmax(coali_ub_ - coali_lb_, axis=1)
 
-        left_ub = coali_ub_.at[split_axis].set(0.0)
-        right_lb = coali_lb_.at[split_axis].set(1.0)
+        left_ub = coali_ub_.at[:, split_axis].set(0.0)
+        right_lb = coali_lb_.at[:, split_axis].set(1.0)
         left_ub = jnp.reshape(left_ub, coali_lb.shape)
         right_lb = jnp.reshape(right_lb, coali_lb.shape)
 
@@ -177,7 +199,7 @@ def shapley_bab(
         return Box(new_coali_lb, new_coali_ub)
 
     def compute_bounds(
-        coalitions: Box[Bool[Array, " b *shape"]], depths: Int[Array, " b"]
+        coalitions: Box[Real[Array, " b *shape"]], depths: Int[Array, " b"]
     ):
         """Compute value and branch-local Shapley value bounds."""
         val_lbs, val_ubs = bound_val_diff(coalitions).concrete
@@ -196,6 +218,7 @@ def shapley_bab(
     def bab_step(batch, num_branches: int):
         new_coalitions = split(batch)
         new_depths = batch.depth + 1
+        new_depths = jnp.concat([new_depths, new_depths], axis=0)
         new_val_lbs, new_val_ubs, new_shapley_lbs, new_shapley_ubs = compute_bounds(
             new_coalitions, new_depths
         )
@@ -223,31 +246,46 @@ def shapley_bab(
     def shapley_bounds(
         branches: BranchData,
     ):
-        """Computes bounds on the overall shapley value using bounds on the value
-        function for each branch.
-        """
-        val_lbs, val_ubs, depths = branches.val_lb, branches.val_ub, branches.depth
-        # -1 because the feature we compute the Shapley value for
-        # is also excluded
-        num_coalitions = 2 ** (num_features - depths - 1)
-        shapley_lb = (num_coalitions * val_lbs).sum()
-        shapley_ub = (num_coalitions * val_ubs).sum()
+        """Computes bounds on the overall Shapley value."""
+        # FIXME: should not access data (specific for SimpleBranchStore)
+        shapley_lb = branches.shapley_lb.data.sum()
+        shapley_ub = branches.shapley_ub.data.sum()
         return shapley_lb, shapley_ub
 
     # Root branch
-    all_coalitions = Box(jnp.zeros_like(x, dtype=bool), jnp.ones_like(x, dtype=bool))
-    val_lb, val_ub = compute_bounds(all_coalitions)
-    zero_depth = jnp.zeros_like(val_lb, dtype=int)
-    root_data = BranchData(all_coalitions, val_lb, val_ub, zero_depth)
+    all_coalitions = Box(
+        jnp.zeros((1,) + x.shape, dtype=x.dtype),
+        jnp.ones((1,) + x.shape, dtype=x.dtype),
+    )
+    zero_depth = jnp.zeros((1,), dtype=int)
+    val_lb, val_ub, shapley_lb, shapley_ub = compute_bounds(all_coalitions, zero_depth)
+    root_data = BranchData(
+        all_coalitions, val_lb, val_ub, zero_depth, shapley_lb, shapley_ub
+    )
 
     branches: BranchStore = make_branch_store(root_data)
+    pruned_shapley_lb = pruned_shapley_ub = jnp.zeros((), dtype=val_lb.dtype)
     while True:
         shapley_lb, shapley_ub = shapley_bounds(branches.data)
+        shapley_lb = shapley_lb + pruned_shapley_lb
+        shapley_ub = shapley_ub + pruned_shapley_ub
         yield Box(shapley_lb, shapley_ub)
+
+        if len(branches) == 0:
+            # All branches are completely split
+            return None
+
+        # Prune completely split branches
+        coali_lb, coali_ub = branches.data.coalitions.concrete
+        # FIXME: should not access data (specific for SimpleBranchStore)
+        single_coalition = (coali_lb.data == coali_ub.data).all(axis=data_axes)
+        single_coalition = MaskBranchSelection(branches, single_coalition)
+        pruned = branches.pop(single_coalition)
+        pruned_shapley_lb = pruned_shapley_lb + pruned.shapley_lb.sum()
+        pruned_shapley_ub = pruned_shapley_ub + pruned.shapley_ub.sum()
 
         selected = select(branches.data)
         batch = branches.pop(selected)
 
-        new_branches, (val_lb, val_ub) = bab_step(batch.data, len(selected))
-        new_branches = BranchData(new_branches, val_lb, val_ub, batch.data.depth + 1)
+        new_branches = bab_step(batch, len(selected))
         branches.add(new_branches)
