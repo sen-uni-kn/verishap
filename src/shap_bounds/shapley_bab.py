@@ -210,7 +210,7 @@ def shapley_bab(
 
         # -1 because the feature we compute the Shapley value for
         # is also excluded
-        num_coalitions = 2 ** (num_features - depths - 1)
+        num_coalitions = jnp.power(2, num_features - depths - 1)
         shapley_lbs = num_coalitions * summand_lbs
         shapley_ubs = num_coalitions * summand_ubs
         return val_lbs, val_ubs, shapley_lbs, shapley_ubs
