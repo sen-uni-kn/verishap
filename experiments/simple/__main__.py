@@ -1,5 +1,6 @@
 # Copyright 2025 David Boetius
 import argparse
+from datetime import datetime, timezone
 from pathlib import Path
 
 import jax
@@ -9,25 +10,29 @@ import pandas as pd
 
 from shap_bounds import baseline_value, shapley_bab
 
-from .models import acasxu_network
+from .models import MLP, SumOut
 
-local_resoure_dir = Path(__file__).parent / "resources"
 local_output_dir = Path(__file__).parent / "output"
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    model_group = parser.add_mutually_exclusive_group(required=True)
+    model_group.add_argument(
+        "--mlp", action="store_true",
+        help="Use an MLP model.",
+    )
+    model_group.add_argument(
+        "--sum", action="store_true",
+        help="Use a trivial linear model.",
+    )
     parser.add_argument(
-        "--model", type=tuple[int, int], default=(2, 1),
-        help="The indices of the ACAS Xu model to load.",
+        "--input-dim", type=int, default=10,
+        help="The dimension of the input.",
     )
     parser.add_argument(
         "--feature", type=int, default=0,
         help="The index of the input feature to compute SHAP bounds for.",
-    )
-    parser.add_argument(
-        "--output-feature", type=int, default=0,
-        help="The index of the output feature to explain.",
     )
     parser.add_argument(
         "--shap-variant", type=str, default="zero-baseline",
@@ -38,24 +43,29 @@ if __name__ == "__main__":
         help="The method to use for computing the bounds.",
     )
     parser.add_argument(
-        "--out-file", type=str, default=local_output_dir / "shapley_bounds.csv",
+        "--out-file", type=str, default=None,
         help="Where to save the experiment results.",
     )
     args = parser.parse_args()
 
     np.random.seed(0)
 
-    model = acasxu_network(*args.model)
+    in_dim = args.input_dim
+    if args.mlp:
+        model = MLP(in_dim, [100, 100], key=jax.random.PRNGKey(0))
+    elif args.sum:
+        model = SumOut()
+    else:
+        raise ValueError(f"Unknown model: {args.model}")
+    model = jax.vmap(model)
 
-    x = np.random.uniform(model.in_min, model.in_max, model.in_means.shape)
-
+    x = np.random.uniform(0.0, 1.0, (in_dim,))
     in_feature = args.feature
-    out_feature = args.output_feature
 
     match args.shap_variant:
         case "zero-baseline":
             baseline = jnp.zeros_like(x)
-            value_fn = baseline_value(model, baseline, out_feature)
+            value_fn = baseline_value(model, baseline, 0)
         case _:
             raise ValueError(f"Unknown SHAP variant: {args.shap_variant}")
 
@@ -68,7 +78,15 @@ if __name__ == "__main__":
     bounds = []
     for lb, ub in bounds_method(value_fn, x, in_feature):
         print(lb, ub)
-        bounds.append((lb, ub))
+        bounds.append((lb.item(), ub.item()))
 
-    bounds = pd.Series(bounds)
-    bounds.to_csv(args.output, index=False)
+    if args.out_file is None:
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
+        model_name = "mlp" if args.mlp else "sum"
+        out_file = local_output_dir / f"{model_name}_{in_dim}_shap_{args.shap_variant}_{args.bound_method}_{timestamp}.csv"
+    else:
+        out_file = Path(args.out_file)
+
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    bounds = pd.DataFrame(bounds, columns=["lb", "ub"])
+    bounds.to_csv(out_file, index=False)

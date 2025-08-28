@@ -266,15 +266,6 @@ def shapley_bab(
     branches: BranchStore = make_branch_store(root_data)
     pruned_shapley_lb = pruned_shapley_ub = jnp.zeros((), dtype=val_lb.dtype)
     while True:
-        shapley_lb, shapley_ub = shapley_bounds(branches.data)
-        shapley_lb = shapley_lb + pruned_shapley_lb
-        shapley_ub = shapley_ub + pruned_shapley_ub
-        yield Box(shapley_lb, shapley_ub)
-
-        if len(branches) == 0:
-            # All branches are completely split
-            return None
-
         # Prune completely split branches
         coali_lb, coali_ub = branches.data.coalitions.concrete
         # FIXME: should not access data (specific for SimpleBranchStore)
@@ -283,6 +274,15 @@ def shapley_bab(
         pruned = branches.pop(single_coalition)
         pruned_shapley_lb = pruned_shapley_lb + pruned.shapley_lb.sum()
         pruned_shapley_ub = pruned_shapley_ub + pruned.shapley_ub.sum()
+
+        shapley_lb, shapley_ub = shapley_bounds(branches.data)
+        shapley_lb = shapley_lb + pruned_shapley_lb
+        shapley_ub = shapley_ub + pruned_shapley_ub
+        yield Box(shapley_lb, shapley_ub)
+
+        if len(branches) == 0:
+            # All branches are completely split
+            return None
 
         selected = select(branches.data)
         batch = branches.pop(selected)
