@@ -24,8 +24,9 @@ class BranchData:
     val_lb: Real[Array, " b"]
     val_ub: Real[Array, " b"]
     depth: Int[Array, " b"]  # count from zero
-    # bounds on the Shapley value if each branch
-    # were the only branch
+    # sum of coalition weights in branch
+    total_coalition_weight: Real[Array, " b"]
+    # bounds on the Shapley value if this branch were the only branch
     shapley_lb: Real[Array, " b"]
     shapley_ub: Real[Array, " b"]
 
@@ -43,7 +44,6 @@ def bound_coalition_weights(
     c(S) is convex.
     """
 
-    # FIXME: exact=True is slow. Use?
     combs = [comb(num_features, i, exact=True) for i in range(num_features)]
     # do this in Python because the integers can be too large for int32
     coalition_weights = [1 / (num_features * comb) for comb in combs]
@@ -155,9 +155,6 @@ def shapley_bab(
 
     num_features = math.prod(x.shape)
     data_axes = tuple(range(1, x.ndim + 1))
-    # Computes all binomial coefficients up to num_features.
-    # This can take a few seconds.
-    bound_coali_weights = bound_coalition_weights(num_features)
 
     val_diff = value_difference(value_fn, x, feature)
     bound_val_diff = compute_bounds(jax.vmap(val_diff))
@@ -186,7 +183,7 @@ def shapley_bab(
 
         coali_lb_ = jnp.reshape(coali_lb, (num_branches, -1))
         coali_ub_ = jnp.reshape(coali_ub, (num_branches, -1))
-        # FIXME: this just splits features in order
+        # TODO: this just splits features in order
         split_axis = jnp.argmax(coali_ub_ - coali_lb_, axis=1)
 
         left_ub = coali_ub_.at[:, split_axis].set(0.0)
@@ -194,19 +191,31 @@ def shapley_bab(
         left_ub = jnp.reshape(left_ub, coali_lb.shape)
         right_lb = jnp.reshape(right_lb, coali_lb.shape)
 
+        old_depth = branches.depth
+        old_num_included = coali_lb_.sum(axis=-1)
+        old_total_coaliw = branches.total_coalition_weight
+        # left branch is exclude branch
+        left_total_coaliw = (
+            (old_depth + 1 - old_num_included) / (old_depth + 2) * old_total_coaliw
+        )
+        right_total_coaliw = (old_num_included + 1) / (old_depth + 2) * old_total_coaliw
+
         new_coali_lb = jnp.concat([coali_lb, right_lb])
         new_coali_ub = jnp.concat([left_ub, coali_ub])
-        return Box(new_coali_lb, new_coali_ub)
+        new_total_coaliw = jnp.concat([left_total_coaliw, right_total_coaliw])
+
+        return Box(new_coali_lb, new_coali_ub), new_total_coaliw
 
     def compute_bounds(
-        coalitions: Box[Real[Array, " b *shape"]], depths: Int[Array, " b"]
+        coalitions: Box[Real[Array, " b *shape"]],
+        total_coaliw: Real[Array, " b"],
+        depths: Int[Array, " b"],
     ):
         """Compute value and branch-local Shapley value bounds."""
         val_lbs, val_ubs = bound_val_diff(coalitions).concrete
-        coaliw_lb, coaliw_ub = bound_coali_weights(coalitions)
 
-        summand_lbs = jnp.where(val_lbs > 0, coaliw_lb, coaliw_ub) * val_lbs
-        summand_ubs = jnp.where(val_ubs < 0, coaliw_lb, coaliw_ub) * val_ubs
+        summand_lbs = total_coaliw * val_lbs
+        summand_ubs = total_coaliw * val_ubs
 
         # -1 because the feature we compute the Shapley value for
         # is also excluded
@@ -216,17 +225,18 @@ def shapley_bab(
         return val_lbs, val_ubs, shapley_lbs, shapley_ubs
 
     def bab_step(batch, num_branches: int):
-        new_coalitions = split(batch)
+        new_coalitions, new_total_coaliw = split(batch)
         new_depths = batch.depth + 1
         new_depths = jnp.concat([new_depths, new_depths], axis=0)
         new_val_lbs, new_val_ubs, new_shapley_lbs, new_shapley_ubs = compute_bounds(
-            new_coalitions, new_depths
+            new_coalitions, new_total_coaliw, new_depths
         )
         return BranchData(
             new_coalitions,
             new_val_lbs,
             new_val_ubs,
             new_depths,
+            new_total_coaliw,
             new_shapley_lbs,
             new_shapley_ubs,
         )
@@ -258,9 +268,12 @@ def shapley_bab(
         jnp.ones((1,) + x.shape, dtype=x.dtype),
     )
     zero_depth = jnp.zeros((1,), dtype=int)
-    val_lb, val_ub, shapley_lb, shapley_ub = compute_bounds(all_coalitions, zero_depth)
+    total_coaliw = jnp.ones((1,), dtype=x.dtype)
+    val_lb, val_ub, shapley_lb, shapley_ub = compute_bounds(
+        all_coalitions, total_coaliw, zero_depth
+    )
     root_data = BranchData(
-        all_coalitions, val_lb, val_ub, zero_depth, shapley_lb, shapley_ub
+        all_coalitions, val_lb, val_ub, zero_depth, total_coaliw, shapley_lb, shapley_ub
     )
 
     branches: BranchStore = make_branch_store(root_data)
