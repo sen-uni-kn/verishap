@@ -116,8 +116,8 @@ def shapley_bab(
     feature: tuple[int, ...],
     compute_bounds=ibp,
     fast_compute_bounds=ibp,
-    batch_size: int = 1024,
-    jit: bool = False,
+    batch_size: int = 2**15,
+    jit: bool = True,
     make_branch_store: Callable[[Any], BranchStore] = SimpleBranchStore,
 ):
     """Compute and refine bounds on Shapley values.
@@ -217,14 +217,9 @@ def shapley_bab(
         """Compute value and branch-local Shapley value bounds."""
         val_lbs, val_ubs = bound_val_diff(coalitions).concrete
 
-        summand_lbs = total_coaliw * val_lbs
-        summand_ubs = total_coaliw * val_ubs
-
-        # -1 because the feature we compute the Shapley value for
-        # is also excluded
-        num_coalitions = jnp.power(2, num_features - depths - 1)
-        shapley_lbs = num_coalitions * summand_lbs
-        shapley_ubs = num_coalitions * summand_ubs
+        # total coaliw is the sum of all coalitions weights in the branch
+        shapley_lbs = total_coaliw * val_lbs
+        shapley_ubs = total_coaliw * val_ubs
         return val_lbs, val_ubs, shapley_lbs, shapley_ubs
 
     def bab_step(batch, num_branches: int):
