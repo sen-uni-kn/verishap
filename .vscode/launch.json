@@ -5,10 +5,22 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: experiments/mnist/shapley_bounds.py",
+            "name": "Python Debugger: experiments/mnist/__main__.py",
             "type": "debugpy",
             "request": "launch",
             "module": "experiments.mnist.shapley_bounds",
+            "justMyCode": false,
+        },
+        {
+            "name": "Python Debugger: experiments/simple/__main__.py",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "experiments.simple.__main__",
+            "args": [
+                "--sum",
+                "--input-dim",
+                "10",
+            ],
             "justMyCode": false,
         }
     ]

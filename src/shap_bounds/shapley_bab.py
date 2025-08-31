@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from formalax import Box, ibp
 from formalax.verify.bab.branch_store import (
     BranchStore,
@@ -116,7 +117,7 @@ def shapley_bab(
     compute_bounds=ibp,
     fast_compute_bounds=ibp,
     batch_size: int = 1024,
-    jit: bool = True,
+    jit: bool = False,
     make_branch_store: Callable[[Any], BranchStore] = SimpleBranchStore,
 ):
     """Compute and refine bounds on Shapley values.
@@ -183,11 +184,13 @@ def shapley_bab(
 
         coali_lb_ = jnp.reshape(coali_lb, (num_branches, -1))
         coali_ub_ = jnp.reshape(coali_ub, (num_branches, -1))
-        # TODO: this just splits features in order
-        split_axis = jnp.argmax(coali_ub_ - coali_lb_, axis=1)
 
-        left_ub = coali_ub_.at[:, split_axis].set(0.0)
-        right_lb = coali_lb_.at[:, split_axis].set(1.0)
+        # FIXME: hard-coded longest edge assuming zero-baseline SHAP
+        edge_len = (coali_ub_ - coali_lb_) * x
+        split_axis = jnp.argmax(edge_len, axis=-1)
+
+        left_ub = coali_ub_.at[np.arange(num_branches), split_axis].set(0.0)
+        right_lb = coali_lb_.at[np.arange(num_branches), split_axis].set(1.0)
         left_ub = jnp.reshape(left_ub, coali_lb.shape)
         right_lb = jnp.reshape(right_lb, coali_lb.shape)
 
