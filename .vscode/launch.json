@@ -5,10 +5,18 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: experiments/mnist/shapley_bounds.py",
+            "name": "Python Debugger: experiments/mnist",
             "type": "debugpy",
             "request": "launch",
-            "module": "experiments.mnist.shapley_bounds",
+            "module": "experiments.mnist",
+            "justMyCode": false,
+        },
+        {
+            "name": "Python Debugger: experiments/simple",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "experiments.simple",
+            "args": ["--sum"],
             "justMyCode": false,
         }
     ]
