@@ -16,7 +16,7 @@
             "type": "debugpy",
             "request": "launch",
             "module": "experiments.simple",
-            "args": ["--sum"],
+            "args": ["--sum", "--input-dim", "10"],
             "justMyCode": false,
         }
     ]
