@@ -116,7 +116,7 @@ def shapley_bab(
     feature: tuple[int, ...],
     compute_bounds=ibp,
     fast_compute_bounds=ibp,
-    batch_size: int = 2**15,
+    batch_size: int = 32,
     jit: bool = True,
     make_branch_store: Callable[[Any], BranchStore] = SimpleBranchStore,
 ):
@@ -126,8 +126,8 @@ def shapley_bab(
         Representation of coalitions: This function represents coalitions as
             a boolean mask of the input features.
             Sets of coalitions are represented as bounds on the boolean mask.
-            While this can not represent all sets of coalitions, it is a succint
-            representation that is easy to split and combine.
+            While this can not represent all sets of coalitions, it is a
+            succinct representation that is easy to split and combine.
 
         Args:
             value_fn: The value function used to evaluate each coalition of features.

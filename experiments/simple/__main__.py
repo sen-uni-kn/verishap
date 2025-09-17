@@ -1,5 +1,6 @@
 # Copyright 2025 David Boetius
 import argparse
+import itertools as it
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -43,6 +44,10 @@ if __name__ == "__main__":
         help="The method to use for computing the bounds.",
     )
     parser.add_argument(
+        "--max-iters", type=int, default=None,
+        help="How many iterations to perform at most.",
+    )
+    parser.add_argument(
         "--out-file", type=str, default=None,
         help="Where to save the experiment results.",
     )
@@ -59,7 +64,9 @@ if __name__ == "__main__":
         raise ValueError(f"Unknown model: {args.model}")
     model = jax.vmap(model)
 
-    x = np.random.uniform(0.0, 1.0, (in_dim,))
+    # x = np.random.uniform(0.0, 1 / in_dim, (in_dim,))
+    x = np.random.randn(in_dim)
+    x = x * (1 / in_dim)
     in_feature = args.feature
 
     match args.shap_variant:
@@ -76,8 +83,9 @@ if __name__ == "__main__":
             raise ValueError(f"Unknown bound method: {args.bound_method}")
 
     bounds = []
-    for lb, ub in bounds_method(value_fn, x, in_feature):
-        print(lb, ub)
+    rounds = range(args.max_iters) if args.max_iters is not None else it.count()
+    for i, (lb, ub) in zip(rounds, bounds_method(value_fn, x, in_feature), strict=False):
+        print(f"{i}:", lb, ub)
         bounds.append((lb.item(), ub.item()))
 
     if args.out_file is None:
