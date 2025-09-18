@@ -46,13 +46,16 @@ def superfeature_baseline_value(
         output: The index of the output to explain.
 
     Returns:
-        A value function that reads a boolean vector indicating which superfeatures are included
-        and returns a scalar value.
+        A value function that reads a boolean vector indicating which
+        superfeatures are included and returns a scalar value.
     """
-    in_dims = tuple(range(-sample.ndim, 0))
+    in_ndim = sample.ndim
+    in_dims = tuple(range(-in_ndim, 0))
 
     def value(_: Real[Array, " sf"], coalitions: Bool[Array, " b sf"]):
-        sf_coali: Bool[Array, " b *n"] = (jnp.expand_dims(coalitions, axis=in_dims) * masks).sum(axis=1)
+        sf_coali: Bool[Array, " b *n"] = (
+            jnp.expand_dims(coalitions, axis=in_dims) * masks
+        ).sum(axis=-in_ndim-1)
         z = sf_coali * sample + (1 - sf_coali) * baseline
         if output is not None:
             return model(z)[..., output]

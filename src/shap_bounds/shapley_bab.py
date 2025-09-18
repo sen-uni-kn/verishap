@@ -1,14 +1,12 @@
 # Copyright 2025 David Boetius
-import math
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Callable
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-from formalax import Box, ibp
+from formalax import Box, crown_ibp, ibp
 from formalax.verify.bab.branch_store import (
-    BranchStore,
     MaskBranchSelection,
     SimpleBranchStore,
 )
@@ -103,7 +101,7 @@ def value_difference(
 
         with_feature = value_fn(x, plus_feature)
         without_feature = value_fn(x, coalition)
-        return (with_feature - without_feature).squeeze()
+        return with_feature - without_feature
 
     return val_difference
 
@@ -114,11 +112,10 @@ def shapley_bab(
     ],
     x: Real[Array, " *shape"],
     feature: tuple[int, ...],
-    compute_bounds=ibp,
+    compute_bounds=crown_ibp,
     fast_compute_bounds=ibp,
-    batch_size: int = 32,
+    batch_size: int = 1024,
     jit: bool = True,
-    make_branch_store: Callable[[Any], BranchStore] = SimpleBranchStore,
 ):
     """Compute and refine bounds on Shapley values.
     This function performs branch and bound on coalitions of input features.
@@ -139,7 +136,6 @@ def shapley_bab(
             feature: Index of the feature for which to compute the Shapley value.
             batch_size: The batch size to use for the branch and bound.
             jit: Whether to just-in-time compile the branch evaluation.
-            make_branch_store: A function that creates a branch store.
 
         Yields:
             Bound on the Shapley value of the feature.
@@ -153,12 +149,10 @@ def shapley_bab(
     # - val: value
     # - diff: difference
     # --------------------------------------------------------------------------
-
-    num_features = math.prod(x.shape)
     data_axes = tuple(range(1, x.ndim + 1))
 
     val_diff = value_difference(value_fn, x, feature)
-    bound_val_diff = compute_bounds(jax.vmap(val_diff))
+    bound_val_diff = compute_bounds(val_diff)
 
     def select(branches: BranchData):
         score = branches.shapley_ub - branches.shapley_lb
@@ -186,7 +180,7 @@ def shapley_bab(
         coali_ub_ = jnp.reshape(coali_ub, (num_branches, -1))
 
         # FIXME: hard-coded longest edge assuming zero-baseline SHAP
-        edge_len = (coali_ub_ - coali_lb_) * x
+        edge_len = jnp.abs((coali_ub_ - coali_lb_) * x)
         split_axis = jnp.argmax(edge_len, axis=-1)
 
         left_ub = coali_ub_.at[np.arange(num_branches), split_axis].set(0.0)
@@ -255,15 +249,15 @@ def shapley_bab(
         branches: BranchData,
     ):
         """Computes bounds on the overall Shapley value."""
-        # FIXME: should not access data (specific for SimpleBranchStore)
         shapley_lb = branches.shapley_lb.data.sum()
         shapley_ub = branches.shapley_ub.data.sum()
         return shapley_lb, shapley_ub
 
     # Root branch
+    without_feature = jnp.ones_like(x).at[feature].set(0.0)
     all_coalitions = Box(
         jnp.zeros((1,) + x.shape, dtype=x.dtype),
-        jnp.ones((1,) + x.shape, dtype=x.dtype),
+        jnp.expand_dims(without_feature, axis=0),
     )
     zero_depth = jnp.zeros((1,), dtype=int)
     total_coaliw = jnp.ones((1,), dtype=x.dtype)
@@ -274,12 +268,11 @@ def shapley_bab(
         all_coalitions, val_lb, val_ub, zero_depth, total_coaliw, shapley_lb, shapley_ub
     )
 
-    branches: BranchStore = make_branch_store(root_data)
+    branches: SimpleBranchStore = SimpleBranchStore(root_data)
     pruned_shapley_lb = pruned_shapley_ub = jnp.zeros((), dtype=val_lb.dtype)
     while True:
         # Prune completely split branches
         coali_lb, coali_ub = branches.data.coalitions.concrete
-        # FIXME: should not access data (specific for SimpleBranchStore)
         single_coalition = (coali_lb.data == coali_ub.data).all(axis=data_axes)
         single_coalition = MaskBranchSelection(branches, single_coalition)
         pruned = branches.pop(single_coalition)
@@ -291,7 +284,7 @@ def shapley_bab(
         shapley_ub = shapley_ub + pruned_shapley_ub
         yield Box(shapley_lb, shapley_ub)
 
-        if len(branches) == 0:
+        if len(branches) == 0 or jnp.isclose(shapley_lb, shapley_ub):
             # All branches are completely split
             return None
 
