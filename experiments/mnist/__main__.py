@@ -85,6 +85,7 @@ if __name__ == "__main__":
     assert num_patches[0] <= 28
     assert num_patches[1] <= 28
     total_patches = num_patches[0] * num_patches[1]
+    num_patches = (1, *num_patches)
 
     in_feature = args.feature
     try:
@@ -98,10 +99,10 @@ if __name__ == "__main__":
     model = jax.vmap(model)
 
     # create patch masks
-    img_size = (28, 28)
+    img_size = (1, 28, 28)
     mask_idx = jnp.arange(total_patches).reshape(num_patches)
     mask_idx = jax.image.resize(mask_idx, img_size, "nearest")
-    masks = jnp.arange(total_patches).reshape((total_patches, 1, 1)) == mask_idx
+    masks = jnp.arange(total_patches).reshape((total_patches, 1, 1, 1)) == mask_idx
 
     testset = torchvision.datasets.MNIST(
         ".datasets",
