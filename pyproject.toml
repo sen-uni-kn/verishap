@@ -25,6 +25,8 @@ experiments = [
     "seaborn==0.13.2",
     "requests==2.32.4",
 ]
+extra = ["jupyter==1.1.1","tqdm==4.67.1"]
+all = ["shap-bounds[experiments,extra]"]
 
 [build-system]
 requires = ["uv_build>=0.8.6,<0.9.0"]
