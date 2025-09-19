@@ -235,23 +235,21 @@ def shapley_bab(
 
     if jit:
         bab_step_jit = jax.jit(bab_step)
-        # FIXME: pad inputs to branch_size
-        bab_step_no_jit = bab_step
 
         def bab_step(batch, num_branches: int):
-            if num_branches < batch_size:
-                # avoid recompilation when there are few branches
-                return bab_step_no_jit(batch, num_branches=num_branches)
-            else:
-                return bab_step_jit(batch, num_branches=num_branches)
+            padding = batch_size - num_branches
 
-    def shapley_bounds(
-        branches: BranchData,
-    ):
-        """Computes bounds on the overall Shapley value."""
-        shapley_lb = branches.shapley_lb.data.sum()
-        shapley_ub = branches.shapley_ub.data.sum()
-        return shapley_lb, shapley_ub
+            def pad(x):
+                pad_val = jnp.empty((padding, *x.shape[1:]), dtype=x.dtype)
+                return jnp.concat([x, pad_val], axis=0)
+
+            def unpad(x_padded):
+                return x_padded[:num_branches]
+
+            padded = jax.tree.map(pad, batch)
+            out_padded = bab_step_jit(padded, num_branches=num_branches)
+            out = jax.tree.map(unpad, out_padded)
+            return out
 
     # Root branch
     without_feature = jnp.ones_like(x).at[feature].set(0.0)
@@ -269,27 +267,26 @@ def shapley_bab(
     )
 
     branches: SimpleBranchStore = SimpleBranchStore(root_data)
-    pruned_shapley_lb = pruned_shapley_ub = jnp.zeros((), dtype=val_lb.dtype)
+    shapley_lb, shapley_ub = root_data.shapley_lb, root_data.shapley_ub
     while True:
         # Prune completely split branches
-        coali_lb, coali_ub = branches.data.coalitions.concrete
+        coali_lb, coali_ub = branches.data.coalitions
         single_coalition = (coali_lb.data == coali_ub.data).all(axis=data_axes)
         single_coalition = MaskBranchSelection(branches, single_coalition)
-        pruned = branches.pop(single_coalition)
-        pruned_shapley_lb = pruned_shapley_lb + pruned.shapley_lb.sum()
-        pruned_shapley_ub = pruned_shapley_ub + pruned.shapley_ub.sum()
+        # shapley bounds from the pruned branches remain part the global bounds
+        branches.pop(single_coalition)
 
-        shapley_lb, shapley_ub = shapley_bounds(branches.data)
-        shapley_lb = shapley_lb + pruned_shapley_lb
-        shapley_ub = shapley_ub + pruned_shapley_ub
-        yield Box(shapley_lb, shapley_ub)
-
+        yield Box(shapley_lb.squeeze(), shapley_ub.squeeze())
         if len(branches) == 0 or jnp.isclose(shapley_lb, shapley_ub):
-            # All branches are completely split
             return None
 
         selected = select(branches.data)
         batch = branches.pop(selected)
+        # Subtract here, since we will refine the bounds for batch
+        shapley_lb = shapley_lb - batch.shapley_lb.sum()
+        shapley_ub = shapley_ub - batch.shapley_ub.sum()
 
         new_branches = bab_step(batch, len(selected))
         branches.add(new_branches)
+        shapley_lb = shapley_lb + new_branches.shapley_lb.sum()
+        shapley_ub = shapley_ub + new_branches.shapley_ub.sum()
