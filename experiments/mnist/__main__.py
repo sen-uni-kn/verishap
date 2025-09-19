@@ -2,6 +2,7 @@
 import argparse
 import itertools as it
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 
 import equinox as eqx
@@ -23,7 +24,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model",
         type=str,
-        default=local_resoure_dir / "mnist-cnn.eqxparams",
+        default=local_resoure_dir / "mnist-cnn-batchnorm.eqxparams",
         help="The path of the model file to load.",
     )
     parser.add_argument(
@@ -95,8 +96,14 @@ if __name__ == "__main__":
         in_feature = in_feature[0] * num_patches[0] + in_feature[1]
     out_feature = args.output_feature
 
-    model = eqx.tree_deserialise_leaves(args.model, CNN(jax.random.PRNGKey(0)))
-    model = jax.vmap(model)
+    model_, state = eqx.nn.make_with_state(CNN)(jax.random.PRNGKey(0))
+    model_, state = eqx.tree_deserialise_leaves(args.model, (model_, state))
+    model_ = eqx.nn.inference_mode(model_)
+
+    @partial(jax.vmap, axis_name="batch")
+    def model(x):
+        y, _ = model_(x, state)
+        return y
 
     # create patch masks
     img_size = (1, 28, 28)

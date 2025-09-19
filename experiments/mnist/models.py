@@ -4,7 +4,7 @@ from functools import partial
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float
+from jaxtyping import Array, Float, PyTree
 
 
 class CNN(eqx.Module):
@@ -20,11 +20,11 @@ class CNN(eqx.Module):
             partial(jnp.reshape, shape=(1, 28, 28)),
             eqx.nn.Conv2d(1, 4, kernel_size=5, padding=2, key=key1),
             eqx.nn.AvgPool2d(kernel_size=2, stride=2),
-            eqx.nn.LayerNorm((4, 14, 14)),
+            eqx.nn.BatchNorm(4, axis_name="batch", mode="batch"),
             jax.nn.relu,
             eqx.nn.Conv2d(4, 8, kernel_size=5, padding=2, key=key2),
             eqx.nn.AvgPool2d(kernel_size=2, stride=2),
-            eqx.nn.LayerNorm((8, 7, 7)),
+            eqx.nn.BatchNorm(8, axis_name="batch", mode="batch"),
             jax.nn.relu,
             jnp.ravel,
             eqx.nn.Linear(392, 64, key=key3),
@@ -32,7 +32,10 @@ class CNN(eqx.Module):
             eqx.nn.Linear(64, 10, key=key4),
         ]
 
-    def __call__(self, x: Float[Array, "1 28 28"] | Float[Array, "28 28"]) -> Float[Array, "10"]:
+    def __call__(self, x: Float[Array, "1 28 28"] | Float[Array, "28 28"], state: PyTree) -> Float[Array, "10"]:
         for layer in self.layers:
-            x = layer(x)
-        return x
+            if isinstance(layer, eqx.nn.BatchNorm):
+                x, state = layer(x, state)
+            else:
+                x = layer(x)
+        return x, state

@@ -63,18 +63,16 @@ if __name__ == "__main__":
         def __len__(self):
             return len(self.data)
 
-
     print("Loading datasets into memory...")
     trainset = MNISTDataset(trainset)
     testset = MNISTDataset(testset)
-
 
     # ==============================================================================
     # Model
     # ==============================================================================
 
     key, subkey = jax.random.split(key, 2)
-    model = CNN(subkey)
+    model, state = eqx.nn.make_with_state(CNN)(subkey)
 
     print("=" * 80)
     print("Model:")
@@ -88,40 +86,54 @@ if __name__ == "__main__":
     print("Training...")
     # MNIST fits into memory, so we don't use data loaders.
 
-
     @eqx.filter_jit
     def accuracy(
-        model: CNN, x: Float[Array, "batch 1 28 28"], y: Int[Array, " batch"]
-    ) -> Float[Array, ""]:
+        model: CNN,
+        state: PyTree,
+        x: Float[Array, "batch 1 28 28"],
+        y: Int[Array, " batch"],
+    ) -> tuple[Float[Array, ""], PyTree]:
         """This function takes as input the current model
         and computes the average accuracy on a batch.
         """
-        pred_y = jax.vmap(model)(x)
+        model = jax.vmap(
+            model, axis_name="batch", in_axes=(0, None), out_axes=(0, None)
+        )
+        pred_y, state = model(x, state)
         pred_y = jnp.argmax(pred_y, axis=1)
-        return jnp.mean(y == pred_y)
-
+        acc = jnp.mean(y == pred_y)
+        return acc, state
 
     @eqx.filter_jit
     def loss(
-        model: CNN, x: Float[Array, "batch 1 28 28"], y: Int[Array, " batch"]
-    ) -> Float[Array, ""]:
+        model: CNN,
+        state: PyTree,
+        x: Float[Array, "batch 1 28 28"],
+        y: Int[Array, " batch"],
+    ) -> tuple[Float[Array, ""], PyTree]:
         # Our input has the shape (BATCH_SIZE, 1, 28, 28), but our model operations on
         # a single input input image of shape (1, 28, 28).
         #
         # Therefore, we have to use jax.vmap, which in this case maps our model over the
         # leading (batch) axis.
-        pred_y = jax.vmap(model)(x)
-        return cross_entropy(pred_y, y).mean()
+        model = jax.vmap(
+            model, axis_name="batch", in_axes=(0, None), out_axes=(0, None)
+        )
+        pred_y, state = model(x, state)
+        loss = cross_entropy(pred_y, y).mean()
+        return loss, state
 
-
-    def evaluate(model: CNN, dataset: Dataset) -> tuple[float, float]:
+    def evaluate(model: CNN, state: PyTree, dataset: Dataset) -> tuple[float, float]:
         """Computes average loss and accuracy over a dataset."""
+        inference_model = eqx.nn.inference_mode(model)
         x, y = dataset.data, dataset.targets
-        return loss(model, x, y), accuracy(model, x, y)
-
+        loss_val, _ = loss(inference_model, state, x, y)
+        acc_val, _ = accuracy(inference_model, state, x, y)
+        return loss_val, acc_val
 
     def train(
         model: CNN,
+        state: PyTree,
         trainset: Dataset,
         testset: Dataset,
         optim: optax.GradientTransformation,
@@ -133,16 +145,19 @@ if __name__ == "__main__":
         @eqx.filter_jit
         def train_step(
             model: CNN,
+            state: PyTree,
             opt_state: PyTree,
             x: Float[Array, "batch 1 28 28"],
             y: Int[Array, " batch"],
         ):
-            loss_value, grads = eqx.filter_value_and_grad(loss)(model, x, y)
+            (loss_value, state), grads = eqx.filter_value_and_grad(loss, has_aux=True)(
+                model, state, x, y
+            )
             updates, opt_state = optim.update(
                 grads, opt_state, eqx.filter(model, eqx.is_array)
             )
             model = eqx.apply_updates(model, updates)
-            return model, opt_state, loss_value
+            return model, state, opt_state, loss_value
 
         x, y = trainset.data, trainset.targets
         epoch_len = len(trainset) // BATCH_SIZE
@@ -154,13 +169,13 @@ if __name__ == "__main__":
                 train_idx = np.array(train_idx)
                 x_batch = x[train_idx]
                 y_batch = y[train_idx]
-                model, opt_state, train_loss = train_step(
-                    model, opt_state, x_batch, y_batch
+                model, state, opt_state, train_loss = train_step(
+                    model, state, opt_state, x_batch, y_batch
                 )
 
                 if (i % print_every) == 0 or (i == epoch_len - 1):
-                    train_loss, train_accuracy = evaluate(model, trainset)
-                    test_loss, test_accuracy = evaluate(model, testset)
+                    train_loss, train_accuracy = evaluate(model, state, trainset)
+                    test_loss, test_accuracy = evaluate(model, state, testset)
                     progress = (i + 1) / epoch_len
                     print(
                         f"[{epoch + 1}/{epochs} {progress:4.0%}] "
@@ -169,10 +184,9 @@ if __name__ == "__main__":
                         f"train accuracy: {train_accuracy.item():.2%}, "
                         f"test accuracy: {test_accuracy.item():.2%}"
                     )
-        return model
-
+        return model, state
 
     optim = optax.adamw(LEARNING_RATE)
-    train(model, trainset, testset, optim, EPOCHS, PRINT_EVERY)
+    model, state = train(model, state, trainset, testset, optim, EPOCHS, PRINT_EVERY)
 
-    eqx.tree_serialise_leaves(OUT_FILE, model)
+    eqx.tree_serialise_leaves(OUT_FILE, (model, state))
