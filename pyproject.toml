@@ -19,6 +19,7 @@ dependencies = [
 experiments = [
     "equinox==0.13.0",
     "optax==0.2.5",
+    "shap==0.49.1",
     "torch==2.8.0",
     "torchvision==0.23.0",
     "pandas==2.3.1",
