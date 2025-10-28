@@ -3,7 +3,7 @@
 import argparse
 import itertools as it
 from dataclasses import dataclass
-from functools import partial
+import io
 
 import equinox as eqx
 import jax
@@ -16,7 +16,7 @@ from jaxtyping import Array, Float, Int, PyTree
 from optax.losses import softmax_cross_entropy_with_integer_labels as cross_entropy
 from sklearn.model_selection import train_test_split
 
-from .models import MLP, zscore_norm, zscore_unnorm
+from .models import MLP
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -31,7 +31,6 @@ if __name__ == "__main__":
     parser.add_argument("--hidden-layers", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
-    parser.add_argument("--weight-decay", type=float, default=None)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--seed", type=int, default=2810)
     parser.add_argument("--print-every", type=int, default=100)
@@ -43,11 +42,10 @@ if __name__ == "__main__":
     hidden_layers = args.hidden_layers
     batch_size = args.batch_size
     learning_rate = args.learning_rate
-    weight_decay = args.weight_decay
     epochs = args.epochs
     seed = args.seed
     print_every = args.print_every
-    out_file = f"{dataset}-mlp-{hidden_dim}x{hidden_layers}.eqxparams"
+    out_file = f"{dataset}-mlp-{hidden_dim}x{hidden_layers}.eqx"
 
     key = jax.random.PRNGKey(seed)
     np.random.seed(seed + 1)
@@ -100,19 +98,14 @@ if __name__ == "__main__":
     # ==============================================================================
 
     key, subkey = jax.random.split(key, 2)
-    input_norm = partial(zscore_norm, mean=data_mean, std=data_std)
-    if is_classification:
-        output_norm = None
-    else:
-        output_norm = partial(zscore_unnorm, mean=targets_mean, std=targets_std)
     model = MLP(
         input_dim=input_dim,
         output_dim=output_dim,
         key=subkey,
         hidden_dim=hidden_dim,
         hidden_layers=hidden_layers,
-        input_normalizer=input_norm,
-        output_normalizer=output_norm,
+        input_norm_stats=(data_mean, data_std),
+        output_norm_stats=None if is_classification else (targets_mean, targets_std),
     )
 
     print("=" * 80)
@@ -161,34 +154,19 @@ if __name__ == "__main__":
         model: MLP,
         x: Float[Array, "batch n"],
         y: Int[Array, " batch"],
-        weight_decay: float | None = None,
     ) -> Float[Array, ""]:
-        if weight_decay is not None:
-            num_params = len(jax.tree.leaves(eqx.filter(model, eqx.is_array)))
-            l2_loss = (
-                weight_decay
-                * sum(
-                    (x**2).mean()
-                    for x in jax.tree.leaves(eqx.filter(model, eqx.is_array))
-                )
-                / num_params
-            )
-        else:
-            l2_loss = 0.0
-
         model = jax.vmap(model, axis_name="batch", in_axes=0, out_axes=0)
         pred_y = model(x)
         if is_classification:
-            loss = cross_entropy(pred_y, y).mean()
+            return cross_entropy(pred_y, y).mean()
         else:
-            loss = ((pred_y - y) ** 2).mean()
-        return loss + l2_loss
+            return ((pred_y - y) ** 2).mean()
 
     def evaluate(model: MLP, dataset: Dataset) -> tuple[float, float]:
         """Computes average loss and other statistics over a dataset."""
         inference_model = eqx.nn.inference_mode(model)
         x, y = dataset.data, dataset.targets
-        loss_val = loss(inference_model, x, y, weight_decay=None)
+        loss_val = loss(inference_model, x, y)
         if is_classification:
             acc_val = eval_classification(inference_model, x, y)
             return loss_val, acc_val
@@ -213,9 +191,7 @@ if __name__ == "__main__":
             x: Float[Array, "batch n"],
             y: Int[Array, " batch"],
         ):
-            loss_value, grads = eqx.filter_value_and_grad(loss)(
-                model, x, y, weight_decay=weight_decay
-            )
+            loss_value, grads = eqx.filter_value_and_grad(loss)(model, x, y)
             updates, opt_state = optim.update(
                 grads, opt_state, eqx.filter(model, eqx.is_array)
             )
@@ -267,15 +243,11 @@ if __name__ == "__main__":
     optim = optax.adamw(learning_rate)
     model = train(model, trainset, testset, optim, epochs, print_every)
 
-    eqx.tree_serialise_leaves(out_file, model)
 
     info_dict = {
         "dataset": dataset,
-        "hidden_dim": hidden_dim,
-        "hidden_layers": hidden_layers,
         "batch_size": batch_size,
         "learning_rate": learning_rate,
-        "weight_decay": weight_decay,
         "epochs": epochs,
         "seed": seed,
     }
@@ -295,5 +267,5 @@ if __name__ == "__main__":
         info_dict["test_loss"] = test_loss.item()
         info_dict["test_rmse"] = test_rmse.item()
         info_dict["test_r_squared"] = test_r_squared.item()
-    with open(out_file.replace(".eqxparams", ".yaml"), "w") as f:
-        yaml.YAML().dump(info_dict, f)
+
+    model.save(out_file, extra_info=info_dict)

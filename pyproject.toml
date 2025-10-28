@@ -27,6 +27,7 @@ experiments = [
     "seaborn==0.13.2",
     "requests==2.32.4",
     "ruamel.yaml==0.18.16",
+    "tqdm==4.67.1",
 ]
 extra = ["jupyter==1.1.1","tqdm==4.67.1"]
 all = ["shap-bounds[experiments,extra]"]

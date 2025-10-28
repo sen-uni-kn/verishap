@@ -2370,6 +2370,7 @@ experiments = [
     { name = "shap" },
     { name = "torch" },
     { name = "torchvision" },
+    { name = "tqdm" },
 ]
 extra = [
     { name = "jupyter" },
@@ -2395,6 +2396,7 @@ requires-dist = [
     { name = "shap-bounds", extras = ["experiments", "extra"], marker = "extra == 'all'" },
     { name = "torch", marker = "extra == 'experiments'", specifier = "==2.8.0" },
     { name = "torchvision", marker = "extra == 'experiments'", specifier = "==0.23.0" },
+    { name = "tqdm", marker = "extra == 'experiments'", specifier = "==4.67.1" },
     { name = "tqdm", marker = "extra == 'extra'", specifier = "==4.67.1" },
 ]
 provides-extras = ["experiments", "extra", "all"]
