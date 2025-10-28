@@ -1,0 +1,14 @@
+dataset: nhanesi
+hidden_dim: 8
+hidden_layers: 1
+batch_size: 32
+learning_rate: 0.0003
+weight_decay:
+epochs: 20
+seed: 2810
+train_loss: 126.90650939941406
+train_rmse: 11.265278816223145
+train_r_squared: 0.38780689239501953
+test_loss: 136.447998046875
+test_rmse: 11.681096076965332
+test_r_squared: 0.3349117636680603

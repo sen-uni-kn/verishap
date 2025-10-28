@@ -1,0 +1,13 @@
+dataset: california
+hidden_dim: 64
+hidden_layers: 2
+batch_size: 64
+learning_rate: 0.0002
+epochs: 200
+seed: 2810
+train_loss: 0.23865078389644623
+train_rmse: 0.48851898312568665
+train_r_squared: 0.8198069930076599
+test_loss: 0.2769797444343567
+test_rmse: 0.526288628578186
+test_r_squared: 0.7963505983352661
