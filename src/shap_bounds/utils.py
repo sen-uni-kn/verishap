@@ -18,3 +18,8 @@ def argmax_k(array: Array, k: int, approx: bool = True) -> Bool[Array, " b"]:
 
     mask = jnp.zeros(array.shape[0], dtype=bool).at[indices].set(True)
     return mask
+
+
+def argmin_k(array: Array, k: int, approx: bool = True) -> Bool[Array, " b"]:
+    """Returns the mask of the k largest elements in the array."""
+    return argmax_k(-array, k, approx)
