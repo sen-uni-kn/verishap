@@ -11,14 +11,13 @@ from formalax.verify.bab.branch_store import (
     SimpleBranchStore,
 )
 from jaxtyping import Array, Int, Real
-from scipy.special import comb
 
 
 @jax.tree_util.register_dataclass
 @dataclass(eq=False, frozen=True)
 class BranchData:
     # contains boolean masks but stored as float
-    # for computing gradients
+    # for computing bounds
     coalitions: Box[Real[Array, " b *shape"]]
     val_lb: Real[Array, " b"]
     val_ub: Real[Array, " b"]
@@ -28,59 +27,6 @@ class BranchData:
     # bounds on the Shapley value if this branch were the only branch
     shapley_lb: Real[Array, " b"]
     shapley_ub: Real[Array, " b"]
-
-
-def bound_coalition_weights(
-    num_features: int,
-) -> Callable[[Box[Real[Array, " b *shape"]]], Box[Real[Array, " b"]]]:
-    """Compute bounds on the weight of a coalition.
-
-    Compute bounds on
-    c(S) = |S|! * (|N| - |S| - 1)! / |N|!
-         = 1/|N| * 1/C(|N| - 1, |S|),
-    where C(n, k) is the binomial coefficient.
-    Since the binomial coefficient is concave,
-    c(S) is convex.
-    """
-
-    combs = [comb(num_features, i, exact=True) for i in range(num_features)]
-    # do this in Python because the integers can be too large for int32
-    coalition_weights = [1 / (num_features * comb) for comb in combs]
-    coalition_weights = jnp.array(coalition_weights)
-    mid_size = num_features // 2
-    min_coalition_weight = coalition_weights[mid_size]
-
-    def bound_coalition_weight(
-        coalitions: Box[Real[Array, " b *shape"]],
-    ) -> Box[Real[Array, " b"]]:
-        # The coalitions set is represented as bounds on the boolean mask.
-        # The smallest coalition in the set excludes all features that have
-        # a lower bound on 0 in coalitions.
-        # Therefore, summing out the lower bound of the mask gives
-        # the size of the smallest coalition.
-        # Similarly for the largest coalition.
-        data_axes = tuple(range(1, coalitions.lower_bound.ndim))
-        size_lb = coalitions.lower_bound.sum(axis=data_axes).astype(jnp.int32)
-        size_ub = coalitions.upper_bound.sum(axis=data_axes).astype(jnp.int32)
-
-        lb = jnp.where(
-            (size_ub < mid_size),
-            coalition_weights[size_ub],  # in falling part of weights
-            jnp.where(
-                (size_lb > mid_size),
-                coalition_weights[size_lb],  # in rising part of weights
-                min_coalition_weight,  # minimum included in [size_lb, size_ub]
-            ),
-        )
-        ub = jnp.where(
-            size_lb < num_features - size_ub,
-            coalition_weights[size_lb],
-            coalition_weights[size_ub],
-        )
-
-        return Box(lb, ub)
-
-    return bound_coalition_weight
 
 
 def value_difference(
@@ -115,7 +61,7 @@ def shapley_bab(
     compute_bounds=crown_ibp,
     fast_compute_bounds=ibp,
     batch_size: int = 1024,
-    jit: bool = True,
+    jit: bool = False,
 ):
     """Compute and refine bounds on Shapley values.
     This function performs branch and bound on coalitions of input features.
@@ -206,7 +152,6 @@ def shapley_bab(
     def compute_bounds(
         coalitions: Box[Real[Array, " b *shape"]],
         total_coaliw: Real[Array, " b"],
-        depths: Int[Array, " b"],
     ):
         """Compute value and branch-local Shapley value bounds."""
         val_lbs, val_ubs = bound_val_diff(coalitions).concrete
@@ -221,7 +166,7 @@ def shapley_bab(
         new_depths = batch.depth + 1
         new_depths = jnp.concat([new_depths, new_depths], axis=0)
         new_val_lbs, new_val_ubs, new_shapley_lbs, new_shapley_ubs = compute_bounds(
-            new_coalitions, new_total_coaliw, new_depths
+            new_coalitions, new_total_coaliw
         )
         return BranchData(
             new_coalitions,
@@ -260,7 +205,7 @@ def shapley_bab(
     zero_depth = jnp.zeros((1,), dtype=int)
     total_coaliw = jnp.ones((1,), dtype=x.dtype)
     val_lb, val_ub, shapley_lb, shapley_ub = compute_bounds(
-        all_coalitions, total_coaliw, zero_depth
+        all_coalitions, total_coaliw
     )
     root_data = BranchData(
         all_coalitions, val_lb, val_ub, zero_depth, total_coaliw, shapley_lb, shapley_ub
@@ -273,7 +218,7 @@ def shapley_bab(
         coali_lb, coali_ub = branches.data.coalitions
         single_coalition = (coali_lb.data == coali_ub.data).all(axis=data_axes)
         single_coalition = MaskBranchSelection(branches, single_coalition)
-        # shapley bounds from the pruned branches remain part the global bounds
+        # shapley bounds from the pruned branches remain part of the global bounds
         branches.pop(single_coalition)
 
         yield Box(shapley_lb.squeeze(), shapley_ub.squeeze())

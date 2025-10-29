@@ -107,7 +107,7 @@ if __name__ == "__main__":
     for lb, ub in tqdm(bounds_iter, total=args.max_iters):
         bounds.append((lb, ub))
 
-    print(bounds[-1][0])
+    print("Best Bound: ", bounds[-1][0], bounds[-1][1])
 
     if args.out_file is None:
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
