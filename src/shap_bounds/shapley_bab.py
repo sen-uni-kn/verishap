@@ -61,7 +61,7 @@ def shapley_bab(
     compute_bounds=crown_ibp,
     fast_compute_bounds=ibp,
     batch_size: int = 1024,
-    jit: bool = False,
+    jit: bool = True,
 ):
     """Compute and refine bounds on Shapley values.
     This function performs branch and bound on coalitions of input features.
@@ -161,7 +161,7 @@ def shapley_bab(
         shapley_ubs = total_coaliw * val_ubs
         return val_lbs, val_ubs, shapley_lbs, shapley_ubs
 
-    def bab_step(batch, num_branches: int):
+    def bab_step(batch: BranchData, num_branches: int):
         new_coalitions, new_total_coaliw = split(batch)
         new_depths = batch.depth + 1
         new_depths = jnp.concat([new_depths, new_depths], axis=0)
@@ -179,9 +179,9 @@ def shapley_bab(
         )
 
     if jit:
-        bab_step_jit = jax.jit(bab_step)
+        bab_step_jit = jax.jit(bab_step, static_argnums=(1,))
 
-        def bab_step(batch, num_branches: int):
+        def bab_step(batch: BranchData, num_branches: int):
             padding = batch_size - num_branches
 
             def pad(x):
@@ -189,10 +189,15 @@ def shapley_bab(
                 return jnp.concat([x, pad_val], axis=0)
 
             def unpad(x_padded):
-                return x_padded[:num_branches]
+                # the values that we unpad have twice the batch size
+                # since they contain first the left branch and
+                # then the right branches
+                left = x_padded[:num_branches]
+                right = x_padded[batch_size:batch_size+num_branches]
+                return jnp.concat([left, right], axis=0)
 
             padded = jax.tree.map(pad, batch)
-            out_padded = bab_step_jit(padded, num_branches=num_branches)
+            out_padded = bab_step_jit(padded, num_branches=batch_size)
             out = jax.tree.map(unpad, out_padded)
             return out
 
