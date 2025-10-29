@@ -87,7 +87,7 @@ def marginal_value(
     def value(x: Real[Array, " *n"], coalitions: Bool[Array, " b *n"]):
         x: Real[Array, " 1 1 *n"] = jnp.expand_dims(x, axis=(0, 1))
         coalitions: Real[Array, " b 1 *n"] = jnp.expand_dims(coalitions, axis=1)
-        z = coalitions * x + (1 - coalitions) * background
+        z: Real[Array, " b d *n"] = coalitions * x + (1 - coalitions) * background
         out = jnp.mean(model(z), axis=1)
         if output is not None:
             return out[..., output]
