@@ -1,5 +1,6 @@
 # Copyright 2025 David Boetius
 import argparse
+import itertools as it
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,7 +12,7 @@ import pandas as pd
 import shap
 from tqdm import tqdm
 
-from shap_bounds import baseline_value, shapley_bab
+from shap_bounds import baseline_value, marginal_value, shapley_bab
 
 from .models import MLP
 
@@ -50,13 +51,20 @@ if __name__ == "__main__":
         "--shap-variant",
         type=str,
         default="zero-baseline",
-        help="The SHAP variant to use.",
+        help="The SHAP variant to use. Options: zero-baseline, marginal-shap",
     )
     parser.add_argument(
         "--bound-method",
         type=str,
         default="bab",
         help="The method to use for computing the bounds.",
+    )
+    parser.add_argument(
+        "--bound-options",
+        type=str,
+        default="",
+        help="Keyword arguments to pass to the bound method in the format "
+        "key1=value1,key2=value2,...",
     )
     parser.add_argument(
         "--max-iters",
@@ -93,6 +101,12 @@ if __name__ == "__main__":
         case "zero-baseline":
             baseline = jnp.zeros_like(x)
             value_fn = baseline_value(model, baseline, out_feature)
+        case "marginal-shap":
+            num_background = 100
+            rng = np.random.default_rng(0)
+            perm = rng.permutation(len(data))
+            background = data[perm[:num_background]]
+            value_fn = marginal_value(model, background, out_feature)
         case _:
             raise ValueError(f"Unknown SHAP variant: {args.shap_variant}")
 
@@ -102,9 +116,20 @@ if __name__ == "__main__":
         case _:
             raise ValueError(f"Unknown bound method: {args.bound_method}")
 
+    bound_kwargs = {}
+    if args.bound_options:
+        for option in args.bound_options.split(","):
+            k, v = option.split("=")
+            try:
+                v = eval(v, {})
+            except NameError:
+                pass
+            bound_kwargs[k] = v
+
+    bounds_iter = bounds_method(value_fn, x, in_feature, **bound_kwargs)
+    iters = range(args.max_iters) if args.max_iters is not None else it.count()
     bounds = []
-    bounds_iter = bounds_method(value_fn, x, in_feature)
-    for lb, ub in tqdm(bounds_iter, total=args.max_iters):
+    for (lb, ub), _ in zip(bounds_iter, iters, strict=False):
         bounds.append((lb, ub))
 
     print("Best Bound: ", bounds[-1][0], bounds[-1][1])
