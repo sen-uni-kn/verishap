@@ -1,6 +1,7 @@
 # Copyright 2025 David Boetius
 from typing import Callable
 
+import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Real
 
@@ -55,11 +56,42 @@ def superfeature_baseline_value(
     def value(_: Real[Array, " sf"], coalitions: Bool[Array, " b sf"]):
         sf_coali: Bool[Array, " b *n"] = (
             jnp.expand_dims(coalitions, axis=in_dims) * masks
-        ).sum(axis=-in_ndim-1)
+        ).sum(axis=-in_ndim - 1)
         z = sf_coali * sample + (1 - sf_coali) * baseline
         if output is not None:
             return model(z)[..., output]
         else:
             return model(z)
+
+    return value
+
+
+def marginal_value(
+    model: Callable[[Real[Array, " b *n"]], Real[Array, " b m"]],
+    background_data: Real[Array, " d *n"],
+    output: int | None = None,
+) -> Callable[[Real[Array, " *n"], Bool[Array, " b *n"]], Real[Array, " b"]]:
+    """The Marginal SHAP value function.
+
+    Args:
+        model: The model to evaluate.
+        background_data: The background data, for example, samples from the training data.
+        output: The index of the output to explain.
+    """
+    background: Real[Array, " 1 d *n"] = jnp.expand_dims(background_data, axis=0)
+    # add an extra batch axis for the background data
+    model: Callable[[Real[Array, " b d *n"]], Real[Array, " b d m"]] = jax.vmap(
+        model, in_axes=1, out_axes=1, axis_name="background"
+    )
+
+    def value(x: Real[Array, " *n"], coalitions: Bool[Array, " b *n"]):
+        x: Real[Array, " 1 1 *n"] = jnp.expand_dims(x, axis=(0, 1))
+        coalitions: Real[Array, " b 1 *n"] = jnp.expand_dims(coalitions, axis=1)
+        z: Real[Array, " b d *n"] = coalitions * x + (1 - coalitions) * background
+        out = jnp.mean(model(z), axis=1)
+        if output is not None:
+            return out[..., output]
+        else:
+            return out
 
     return value

@@ -4,8 +4,8 @@ import io
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float
 import ruamel.yaml as yaml
+from jaxtyping import Array, Float
 
 
 class ZScoreNorm(eqx.Module):
@@ -57,7 +57,10 @@ class MLP(eqx.Module):
         self.input_norm = ZScoreNorm(input_mean, input_std)
 
         if output_norm_stats is None:
-            output_mean, output_std = jnp.zeros(output_dim), jnp.ones(output_dim)
+            if output_dim == 1:
+                output_mean, output_std = jnp.zeros(()), jnp.ones(())
+            else:
+                output_mean, output_std = jnp.zeros(output_dim), jnp.ones(output_dim)
         else:
             output_mean, output_std = output_norm_stats
         self.output_norm = ZScoreUnnorm(output_mean, output_std)

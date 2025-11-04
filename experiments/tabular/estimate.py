@@ -126,6 +126,8 @@ if __name__ == "__main__":
         estimate = estimate[in_feature, out_feature]
         estimates.append({"num_samples": n, "estimate": estimate.item()})
 
+    print("Best Estimate: ", estimates[-1]["estimate"])
+
     if args.out_file is None:
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
         out_file = (
