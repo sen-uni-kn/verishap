@@ -9,11 +9,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
-import shap
 from tqdm import tqdm
 
 from .. import shaplib
 from .models import MLP
+from .utils import load_dataset
 
 local_resoure_dir = Path(__file__).parent / "resources"
 local_output_dir = Path(__file__).parent / "output"
@@ -80,9 +80,7 @@ if __name__ == "__main__":
     dataset = args.dataset
     if dataset is None:
         dataset = args.model.stem.split("-")[0]
-    data, targets = getattr(shap.datasets, dataset)()
-    data = data.to_numpy().astype(np.float32)
-    data = np.nan_to_num(data)
+    data, targets = load_dataset(dataset)
 
     model = MLP.load(args.model)
     model = eqx.nn.inference_mode(model)
