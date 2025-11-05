@@ -3,20 +3,18 @@
 import argparse
 import itertools as it
 from dataclasses import dataclass
-import io
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-import ruamel.yaml as yaml
-import shap
 from jaxtyping import Array, Float, Int, PyTree
 from optax.losses import softmax_cross_entropy_with_integer_labels as cross_entropy
 from sklearn.model_selection import train_test_split
 
 from .models import MLP
+from .utils import load_dataset
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -56,10 +54,7 @@ if __name__ == "__main__":
 
     print("=" * 80)
     print(f"Obtaining {dataset} dataset...")
-
-    data, targets = getattr(shap.datasets, dataset)()
-    data = data.to_numpy().astype(np.float32)
-    data = np.nan_to_num(data)
+    data, targets = load_dataset(dataset)
 
     data_mean, data_std = data.mean(axis=0), data.std(axis=0)
     targets_mean, targets_std = targets.mean(axis=0), targets.std(axis=0)
@@ -242,7 +237,6 @@ if __name__ == "__main__":
 
     optim = optax.adamw(learning_rate)
     model = train(model, trainset, testset, optim, epochs, print_every)
-
 
     info_dict = {
         "dataset": dataset,
