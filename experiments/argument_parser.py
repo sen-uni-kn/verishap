@@ -11,10 +11,14 @@ from typing import Any, Callable
 
 import jax.numpy as jnp
 import numpy as np
-import pandas as pd
 import torch
 
-from shap_bounds import baseline_value, marginal_value, shapley_bab
+from shap_bounds import (
+    baseline_value,
+    marginal_value,
+    shapley_bab,
+    superfeature_baseline_value,
+)
 
 from . import shaplib
 
@@ -76,7 +80,8 @@ class CmdArgs(ABC):
             "--shap-variant",
             type=str,
             default="zero-baseline",
-            help="The SHAP variant to use. Options: zero-baseline, marginal",
+            help="The SHAP variant to use. Options: zero-baseline, marginal, "
+            "superfeature-zero-baseline, superfeature-marginal",
         )
         self.parser.add_argument(
             "--num-background-samples",
@@ -155,6 +160,14 @@ class CmdArgs(ABC):
         raise NotImplementedError
 
     @property
+    def masks(self) -> np.ndarray | None:
+        """Obtain masks for superfeature value functions.
+
+        Returns None if superfeatures are not supported.
+        """
+        return None
+
+    @property
     def sample(self) -> np.ndarray:
         return self.data[self.args.input]
 
@@ -168,29 +181,52 @@ class CmdArgs(ABC):
 
     @property
     def value_function(self) -> Callable:
+        shap_variant = self.args.shap_variant
         out_feature = self.args.output_feature
-        match self.shap_variant:
+
+        masks = self.masks
+        if masks is None and "superfeature" in shap_variant:
+            raise NotImplementedError(
+                "Superfeature value functions are not implemented for this experiment."
+            )
+
+        x = self.sample
+        match shap_variant:
             case "zero-baseline":
-                baseline = jnp.zeros_like(self.sample)
-                return baseline_value(self.model, baseline, out_feature)
+                baseline = jnp.zeros_like(x)
+                return baseline_value(self.model, x, baseline, out_feature)
             case "marginal":
-                return marginal_value(self.model, self.background_data, out_feature)
+                return marginal_value(self.model, x, self.background_data, out_feature)
+            case "superfeature-zero-baseline":
+                baseline = jnp.zeros_like(x)
+                return superfeature_baseline_value(
+                    self.model, x, baseline, masks, out_feature
+                )
             case _:
                 raise ValueError(f"Unknown SHAP variant: {self.shap_variant}")
 
     @property
-    def bounds_method(self) -> Callable:
-        match self.bound_method:
+    def base_mask(self) -> np.ndarray:
+        if "superfeature" in self.args.shap_variant:
+            _, total_patches = self.num_patches
+            return jnp.ones(total_patches, dtype=jnp.float32)
+        else:
+            return self.sample
+
+    @property
+    def bound_method(self) -> Callable:
+        match self.args.bound_method.lower():
             case "bab":
-                return partial(
+                res = partial(
                     shapley_bab,
                     self.value_function,
-                    self.sample,
+                    self.base_mask,
                     self.feature,
                     **self.bound_kwargs,
                 )
+                return res
             case _:
-                raise ValueError(f"Unknown bound method: {self.bound_method}")
+                raise ValueError(f"Unknown bound method: {self.args.bound_method}")
 
     @property
     def bound_kwargs(self) -> dict:

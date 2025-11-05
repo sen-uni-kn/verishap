@@ -8,6 +8,7 @@ from jaxtyping import Array, Bool, Real
 
 def baseline_value(
     model: Callable[[Real[Array, " b *n"]], Real[Array, " b m"]],
+    sample: Real[Array, " *n"],
     baseline: Real[Array, " *n"],
     output: int | None = None,
 ) -> Callable[[Real[Array, " *n"], Bool[Array, " b *n"]], Real[Array, " b"]]:
@@ -15,13 +16,14 @@ def baseline_value(
 
     Args:
         model: The model to evaluate.
+        sample: The sample to explain.
         baseline: The baseline value.
         output: The index of the output to explain.
     """
     baseline = jnp.expand_dims(baseline, axis=0)
 
-    def value(x: Real[Array, " *n"], coalitions: Bool[Array, " b *n"]):
-        x = jnp.expand_dims(x, axis=0)
+    def value(coalitions: Bool[Array, " b *n"]):
+        x = jnp.expand_dims(sample, axis=0)
         z = coalitions * x + (1 - coalitions) * baseline
         if output is not None:
             return model(z)[..., output]
@@ -42,6 +44,7 @@ def superfeature_baseline_value(
 
     Args:
         model: The model to evaluate.
+        sample: The sample to explain.
         baseline: The baseline value.
         masks: The masks for the superfeatures in the input.
         output: The index of the output to explain.
@@ -53,7 +56,7 @@ def superfeature_baseline_value(
     in_ndim = sample.ndim
     in_dims = tuple(range(-in_ndim, 0))
 
-    def value(_: Real[Array, " sf"], coalitions: Bool[Array, " b sf"]):
+    def value(coalitions: Bool[Array, " b sf"]):
         sf_coali: Bool[Array, " b *n"] = (
             jnp.expand_dims(coalitions, axis=in_dims) * masks
         ).sum(axis=-in_ndim - 1)
@@ -68,6 +71,7 @@ def superfeature_baseline_value(
 
 def marginal_value(
     model: Callable[[Real[Array, " b *n"]], Real[Array, " b m"]],
+    sample: Real[Array, " *n"],
     background_data: Real[Array, " d *n"],
     output: int | None = None,
 ) -> Callable[[Real[Array, " *n"], Bool[Array, " b *n"]], Real[Array, " b"]]:
@@ -75,6 +79,7 @@ def marginal_value(
 
     Args:
         model: The model to evaluate.
+        sample: The sample to explain.
         background_data: The background data, for example, samples from the training data.
         output: The index of the output to explain.
     """
@@ -84,8 +89,8 @@ def marginal_value(
         model, in_axes=1, out_axes=1, axis_name="background"
     )
 
-    def value(x: Real[Array, " *n"], coalitions: Bool[Array, " b *n"]):
-        x: Real[Array, " 1 1 *n"] = jnp.expand_dims(x, axis=(0, 1))
+    def value(coalitions: Bool[Array, " b *n"]):
+        x: Real[Array, " 1 1 *n"] = jnp.expand_dims(sample, axis=(0, 1))
         coalitions: Real[Array, " b 1 *n"] = jnp.expand_dims(coalitions, axis=1)
         z: Real[Array, " b d *n"] = coalitions * x + (1 - coalitions) * background
         out = jnp.mean(model(z), axis=1)

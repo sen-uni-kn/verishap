@@ -9,7 +9,8 @@
             "name": "Python Debugger: experiments/mnist",
             "type": "debugpy",
             "request": "launch",
-            "module": "experiments.mnist",
+            "module": "experiments.mnist.bound",
+            "args": ["--model", "experiments/mnist/resources/mnist-cnn-batchnorm.eqxparams", "--num-patches", "4"],
             "justMyCode": false,
         },
         {

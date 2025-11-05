@@ -33,7 +33,7 @@ def contribution(
     value_fn: Callable[
         [Real[Array, " *shape"], Real[Array, " b *shape"]], Real[Array, " b"]
     ],
-    x: Real[Array, " *shape"],
+    base_mask: Real[Array, " *shape"],
     feature: tuple[int, ...],
 ):
     """Computes the contribution of `feature` to coalitions.
@@ -42,13 +42,14 @@ def contribution(
 
     Args:
         value_fn: The value function used to evaluate each coalition of features.
-        x: The input feature values.
+        base_mask: A base mask as an input to the value function.
+            Can have arbitrary values but needs to have the correct shape.
         feature: Index of the feature for which to compute the contribution.
 
     Returns:
         A function that computes the contribution of `feature` to coalitions.
     """
-    include_feature = jnp.zeros_like(x)  # use float dtype for computing smears
+    include_feature = jnp.zeros_like(base_mask)  # use float dtypes for computing bounds
     include_feature = include_feature.at[feature].set(1.0)
 
     def contrib(coalition: Real[Array, " b *shape"]):
@@ -57,8 +58,8 @@ def contribution(
         one = jnp.ones_like(coalition)
         plus_feature = (coalition + include_feature).clip(max=one)
 
-        with_feature = value_fn(x, plus_feature)
-        without_feature = value_fn(x, coalition)
+        with_feature = value_fn(plus_feature)
+        without_feature = value_fn(coalition)
         return with_feature - without_feature
 
     return contrib
@@ -68,7 +69,7 @@ def shapley_bab(
     value_fn: Callable[
         [Real[Array, " *shape"], Real[Array, " b *shape"]], Real[Array, " b"]
     ],
-    x: Real[Array, " *shape"],
+    base_mask: Real[Array, " *shape"],
     feature: tuple[int, ...],
     compute_bounds=crown_ibp,
     fast_compute_bounds=ibp,
@@ -99,7 +100,8 @@ def shapley_bab(
                 The second is a boolean mask, determining which input features
                 are in the coalition.
                 The output of ``value_fn`` is the value of the coalition.
-            x: The input feature values.
+            base_mask: A base mask as an input to the value function.
+                Can have arbitrary values but needs to have the correct shape.
             feature: Index of the feature for which to compute the Shapley value.
             select_strategy: The strategy to use for selecting branches.
                 - "max-diam": Select the branch with the largest difference between upper and lower bound.
@@ -122,9 +124,9 @@ def shapley_bab(
     # - val: value
     # - diff: difference
     # --------------------------------------------------------------------------
-    data_axes = tuple(range(1, x.ndim + 1))
+    data_axes = tuple(range(1, base_mask.ndim + 1))
 
-    contrib = contribution(value_fn, x, feature)
+    contrib = contribution(value_fn, base_mask, feature)
     bound_contrib = compute_bounds(contrib)
     fast_bound_contrib = fast_compute_bounds(contrib)
 
@@ -288,13 +290,13 @@ def shapley_bab(
             return out
 
     # Root branch
-    without_feature = jnp.ones_like(x).at[feature].set(0.0)
+    without_feature = jnp.ones_like(base_mask).at[feature].set(0.0)
     all_coalitions = Box(
-        jnp.zeros((1,) + x.shape, dtype=x.dtype),
+        jnp.zeros((1,) + base_mask.shape, dtype=base_mask.dtype),
         jnp.expand_dims(without_feature, axis=0),
     )
     zero_depth = jnp.zeros((1,), dtype=int)
-    total_coaliw = jnp.ones((1,), dtype=x.dtype)
+    total_coaliw = jnp.ones((1,), dtype=base_mask.dtype)
     contrib_lb, contrib_ub, shapley_lb, shapley_ub = compute_bounds(
         all_coalitions, total_coaliw
     )
