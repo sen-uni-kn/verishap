@@ -323,12 +323,13 @@ def shapley_bab(
 
         if log:
             num_branches = len(branches)
-            num_pruned = (single_coalition | tight_bounds).sum()
+            num_fully_split = single_coalition.sum()
             num_tight = (tight_bounds & ~single_coalition).sum()
             lb, ub = shapley_lb.item(), shapley_ub.item()
+            mid, ran = (lb + ub) / 2, (ub - lb) / 2
             print(
-                f"[i: {i:4d}] {lb:8.4f} <= S <= {ub:8.4f}\t|"
-                f" {num_branches} branches, {num_pruned} pruned, {num_tight} pruned since tight"
+                f"[i: {i:3d}] S ∈ [{mid:8.4f} ± {ran:8.4f}]\t|"
+                f" {num_branches} branches, pruned: {num_tight} tight, {num_fully_split} fully split"
             )
 
         if len(branches) == 0 or jnp.isclose(shapley_lb, shapley_ub):
