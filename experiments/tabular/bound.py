@@ -22,15 +22,8 @@ if __name__ == "__main__":
         .out_file_args()
         .parse_args()
     )
-    np.random.seed(0)
-    model = args.model
-    in_feature = args.feature
-    data, _ = args.dataset
-    x = data[args.input]
-    value_fn = args.value_function(model, x, data)
-    bounds_method = args.bounds_method
 
-    bounds_iter = bounds_method(value_fn, x, in_feature)
+    bounds_iter = args.bounds_method()
     iters = range(args.max_iters) if args.max_iters is not None else it.count()
     bounds = [(lb, ub) for (lb, ub), _ in zip(bounds_iter, iters, strict=False)]
     print("Best Bound: ", bounds[-1][0], bounds[-1][1])

@@ -1,6 +1,7 @@
 # Copyright 2025 David Boetius
 """Utilities for parsing command line arguments for tabular datasets."""
 
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -19,11 +20,12 @@ class TabularCmdArgs(CmdArgs):
         super().__init__(*parser_args, **parser_kwargs)
 
     @property
-    def dataset(self) -> tuple[np.ndarray, np.ndarray]:
+    def data(self) -> Iterable[np.ndarray]:
         dataset = self.args.dataset
         if dataset is None:
             dataset = self.args.model.stem.split("-")[0]
-        return load_dataset(dataset)
+        data, _ = load_dataset(dataset)
+        return data
 
     @property
     def model(self) -> Callable:

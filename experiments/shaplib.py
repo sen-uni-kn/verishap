@@ -2,15 +2,14 @@
 #  Licensed under the MIT license.
 from typing import Callable
 
-import jax
 import jax.numpy as jnp
 import numpy as np
-from jaxtyping import Array, Real
 import shap
+from jaxtyping import Array, Real
 
 
 def model_wrapper(model):
-    """Wraps a model to handle batching."""
+    """Wraps a model to handle np.ndarray inputs."""
 
     def wrapper(x: np.ndarray) -> np.ndarray:
         x = jnp.asarray(x)
@@ -35,7 +34,7 @@ def exact_shap(
     baseline, x = np.asarray(baseline), np.asarray(x)
     baseline, x = np.atleast_2d(baseline), np.atleast_2d(x)
 
-    explainer = shap.ExactExplainer(model, baseline)
+    explainer = shap.ExactExplainer(model, masker=baseline)
     explanation = explainer(x, max_evals=num_samples, silent=silent)
     return explanation.values[0]
 
@@ -46,7 +45,7 @@ def kernel_shap(model, baseline, x, num_samples=1024, silent=False):
     baseline, x = np.asarray(baseline), np.asarray(x)
     baseline = np.atleast_2d(baseline)
 
-    explainer = shap.KernelExplainer(model, baseline)
+    explainer = shap.KernelExplainer(model, data=baseline)
     shap_values = explainer.shap_values(
         x, nsamples=num_samples, silent=silent, l1_reg=False
     )
@@ -63,7 +62,7 @@ def permutation_shap(model, baseline, x, num_samples=1024, silent=False):
     num_features = x.shape[-1]
     num_permutations = num_samples // num_features
 
-    explainer = shap.PermutationExplainer(model, baseline)
+    explainer = shap.PermutationExplainer(model, masker=baseline)
     shap_values = explainer.shap_values(
         x, npermutations=num_permutations, silent=silent
     )
@@ -76,6 +75,6 @@ def sampling_shap(model, baseline, x, num_samples=1024, silent=False):
     baseline, x = np.asarray(baseline), np.asarray(x)
     baseline = np.atleast_2d(baseline)
 
-    explainer = shap.SamplingExplainer(model, baseline)
+    explainer = shap.SamplingExplainer(model, masker=baseline)
     shap_values = explainer.shap_values(x, nsamples=num_samples, silent=silent)
     return shap_values

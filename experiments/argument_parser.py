@@ -2,6 +2,8 @@
 """Utilities for parsing command line arguments."""
 
 import argparse
+from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
@@ -9,14 +11,18 @@ from typing import Any, Callable
 
 import jax.numpy as jnp
 import numpy as np
+import pandas as pd
+import torch
 
 from shap_bounds import baseline_value, marginal_value, shapley_bab
 
 from . import shaplib
 
 
-class CmdArgs:
+class CmdArgs(ABC):
     def __init__(self, *parser_args, **parser_kwargs):
+        np.random.seed(0)
+        torch.manual_seed(0)
         self.parser = argparse.ArgumentParser(*parser_args, **parser_kwargs)
         self.args = None
 
@@ -29,17 +35,23 @@ class CmdArgs:
         )
         return self
 
-    def dataset_args(self, default: str = None) -> "CmdArgs":
+    def dataset_args(
+        self, default_dataset: str = None, default_data_index: int = 0
+    ) -> "CmdArgs":
         self.parser.add_argument(
             "--dataset",
             type=str,
-            default=default,
+            default=default_dataset,
             help="The name of the dataset to use.",
         )
+        self.data_index_args(default_data_index)
+        return self
+
+    def data_index_args(self, default: int = 0) -> "CmdArgs":
         self.parser.add_argument(
             "--input",
             type=int,
-            default=0,
+            default=default,
             help="The index of the input sample to analyse in the dataset.",
         )
         return self
@@ -130,20 +142,39 @@ class CmdArgs:
 
     # =========================================================================
 
-    def background_data(self, data) -> np.ndarray:
-        num_background = self.num_background_samples
+    @property
+    @abstractmethod
+    def model(self) -> Callable:
+        """Obtain the model as a callable."""
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def data(self) -> Iterable[np.ndarray]:
+        """Obtain the data as a numpy array or indexable dataset."""
+        raise NotImplementedError
+
+    @property
+    def sample(self) -> np.ndarray:
+        return self.data[self.args.input]
+
+    @property
+    def background_data(self) -> np.ndarray:
+        num_background = self.args.num_background_samples
+        data = self.data
         rng = np.random.default_rng(0)
         perm = rng.permutation(len(data))
         return data[perm[:num_background]]
 
-    def value_function(self, model, sample, data) -> Callable:
+    @property
+    def value_function(self) -> Callable:
         out_feature = self.args.output_feature
         match self.shap_variant:
             case "zero-baseline":
-                baseline = jnp.zeros_like(sample)
-                return baseline_value(model, baseline, out_feature)
+                baseline = jnp.zeros_like(self.sample)
+                return baseline_value(self.model, baseline, out_feature)
             case "marginal":
-                return marginal_value(model, self.background_data(data), out_feature)
+                return marginal_value(self.model, self.background_data, out_feature)
             case _:
                 raise ValueError(f"Unknown SHAP variant: {self.shap_variant}")
 
@@ -151,10 +182,18 @@ class CmdArgs:
     def bounds_method(self) -> Callable:
         match self.bound_method:
             case "bab":
-                bound_method = shapley_bab
+                return partial(
+                    shapley_bab,
+                    self.value_function,
+                    self.sample,
+                    self.feature,
+                    **self.bound_kwargs,
+                )
             case _:
                 raise ValueError(f"Unknown bound method: {self.bound_method}")
 
+    @property
+    def bound_kwargs(self) -> dict:
         bound_kwargs = {}
         if self.bound_options:
             for option in self.bound_options.split(","):
@@ -164,19 +203,39 @@ class CmdArgs:
                 except NameError:
                     pass
                 bound_kwargs[k] = v
+        return bound_kwargs
 
-        return partial(bound_method, **bound_kwargs)
-
-    def estimator(self, model, sample, data) -> Callable:
-        match self.args.estimator.lower().replace("-", "").replace("_", "").replace(" ", ""):
+    def estimator(self) -> Callable:
+        match (
+            self.args.estimator.lower()
+            .replace("-", "")
+            .replace("_", "")
+            .replace(" ", "")
+        ):
             case "exactshap":
-                estimator = partial(shaplib.exact_shap, model, silent=True)
+                estimator = partial(
+                    shaplib.exact_shap,
+                    self.model,
+                    silent=True,
+                )
             case "kernelshap":
-                estimator = partial(shaplib.kernel_shap, model, silent=True)
+                estimator = partial(
+                    shaplib.kernel_shap,
+                    self.model,
+                    silent=True,
+                )
             case "permutationshap":
-                estimator = partial(shaplib.permutation_shap, model, silent=True)
+                estimator = partial(
+                    shaplib.permutation_shap,
+                    self.model,
+                    silent=True,
+                )
             case "samplingshap":
-                estimator = partial(shaplib.sampling_shap, model, silent=True)
+                estimator = partial(
+                    shaplib.sampling_shap,
+                    self.model,
+                    silent=True,
+                )
             case "leverageshap":
                 # TODO :)
                 pass
@@ -185,10 +244,10 @@ class CmdArgs:
 
         match self.args.shap_variant:
             case "zero-baseline":
-                baseline = jnp.zeros_like(sample)
-                estimator = partial(estimator, baseline)
+                baseline = jnp.zeros_like(self.sample)
+                estimator = partial(estimator, baseline, self.sample)
             case "marginal":
-                estimator = partial(estimator, self.background_data(data))
+                estimator = partial(estimator, self.background_data, self.sample)
             case _:
                 raise ValueError(f"Unknown SHAP variant: {self.args.shap_variant}")
 
