@@ -1,0 +1,232 @@
+# Copyright 2025 David Boetius
+"""Utilities for parsing command line arguments."""
+
+import argparse
+from datetime import datetime, timezone
+from functools import partial
+from pathlib import Path
+from typing import Any, Callable
+
+import jax.numpy as jnp
+import numpy as np
+
+from shap_bounds import baseline_value, marginal_value, shapley_bab
+
+from . import shaplib
+
+
+class CmdArgs:
+    def __init__(self, *parser_args, **parser_kwargs):
+        self.parser = argparse.ArgumentParser(*parser_args, **parser_kwargs)
+        self.args = None
+
+    def model_args(self, resource_dir: Path) -> "CmdArgs":
+        self.parser.add_argument(
+            "--model",
+            type=Path,
+            required=True,
+            help="The path of the model file to load.",
+        )
+        return self
+
+    def dataset_args(self, default: str = None) -> "CmdArgs":
+        self.parser.add_argument(
+            "--dataset",
+            type=str,
+            default=default,
+            help="The name of the dataset to use.",
+        )
+        self.parser.add_argument(
+            "--input",
+            type=int,
+            default=0,
+            help="The index of the input sample to analyse in the dataset.",
+        )
+        return self
+
+    def feature_args(self) -> "CmdArgs":
+        self.parser.add_argument(
+            "--feature",
+            type=int,
+            default=0,
+            help="The index of the input feature to compute SHAP bounds for.",
+        )
+        self.parser.add_argument(
+            "--output-feature",
+            type=int,
+            default=0,
+            help="The index of the output feature to explain.",
+        )
+        return self
+
+    def shap_variant_args(self) -> "CmdArgs":
+        self.parser.add_argument(
+            "--shap-variant",
+            type=str,
+            default="zero-baseline",
+            help="The SHAP variant to use. Options: zero-baseline, marginal",
+        )
+        self.parser.add_argument(
+            "--num-background-samples",
+            type=int,
+            default=100,
+            help="The number of background samples to use for the marginal SHAP variant.",
+        )
+        return self
+
+    def bound_method_args(self) -> "CmdArgs":
+        self.parser.add_argument(
+            "--bound-method",
+            type=str,
+            default="bab",
+            help="The method to use for computing the bounds.",
+        )
+        self.parser.add_argument(
+            "--bound-options",
+            type=str,
+            default="",
+            help="Keyword arguments to pass to the bound method in the format "
+            "key1=value1,key2=value2,...",
+        )
+        self.parser.add_argument(
+            "--max-iters",
+            type=int,
+            default=None,
+            help="How many iterations to perform at most.",
+        )
+        return self
+
+    def estimator_args(self) -> "CmdArgs":
+        self.parser.add_argument(
+            "--estimator",
+            type=str,
+            default="KernelSHAP",
+            help="The SHAP estimator to use. "
+            "Options: ExactSHAP, KernelSHAP, PermutationSHAP, SamplingSHAP, LeverageSHAP.",
+        )
+        self.parser.add_argument(
+            "--num-samples",
+            type=str,
+            default="1000",
+            help="The number of validation samples to use for the SHAP estimator. "
+            "This can be a single number, a range, or a list of numbers. "
+            "For example, --num-samples 1:100:10 specifies a range and "
+            "--num-samples 100,200,300 specifies a list.",
+        )
+        return self
+
+    def out_file_args(self) -> "CmdArgs":
+        self.parser.add_argument(
+            "--out-file",
+            type=str,
+            default=None,
+            help="Where to save the experiment results.",
+        )
+        return self
+
+    def parse_args(self) -> "CmdArgs":
+        self.args = self.parser.parse_args()
+        return self
+
+    # =========================================================================
+
+    def background_data(self, data) -> np.ndarray:
+        num_background = self.num_background_samples
+        rng = np.random.default_rng(0)
+        perm = rng.permutation(len(data))
+        return data[perm[:num_background]]
+
+    def value_function(self, model, sample, data) -> Callable:
+        out_feature = self.args.output_feature
+        match self.shap_variant:
+            case "zero-baseline":
+                baseline = jnp.zeros_like(sample)
+                return baseline_value(model, baseline, out_feature)
+            case "marginal":
+                return marginal_value(model, self.background_data(data), out_feature)
+            case _:
+                raise ValueError(f"Unknown SHAP variant: {self.shap_variant}")
+
+    @property
+    def bounds_method(self) -> Callable:
+        match self.bound_method:
+            case "bab":
+                bound_method = shapley_bab
+            case _:
+                raise ValueError(f"Unknown bound method: {self.bound_method}")
+
+        bound_kwargs = {}
+        if self.bound_options:
+            for option in self.bound_options.split(","):
+                k, v = option.split("=")
+                try:
+                    v = eval(v, {})
+                except NameError:
+                    pass
+                bound_kwargs[k] = v
+
+        return partial(bound_method, **bound_kwargs)
+
+    def estimator(self, model, sample, data) -> Callable:
+        match self.args.estimator.lower().replace("-", "").replace("_", "").replace(" ", ""):
+            case "exactshap":
+                estimator = partial(shaplib.exact_shap, model, silent=True)
+            case "kernelshap":
+                estimator = partial(shaplib.kernel_shap, model, silent=True)
+            case "permutationshap":
+                estimator = partial(shaplib.permutation_shap, model, silent=True)
+            case "samplingshap":
+                estimator = partial(shaplib.sampling_shap, model, silent=True)
+            case "leverageshap":
+                # TODO :)
+                pass
+            case _:
+                raise ValueError(f"Unknown SHAP estimator: {self.args.estimator}")
+
+        match self.args.shap_variant:
+            case "zero-baseline":
+                baseline = jnp.zeros_like(sample)
+                estimator = partial(estimator, baseline)
+            case "marginal":
+                estimator = partial(estimator, self.background_data(data))
+            case _:
+                raise ValueError(f"Unknown SHAP variant: {self.args.shap_variant}")
+
+        return estimator
+
+    @property
+    def num_samples(self) -> list:
+        num_samples = self.args.num_samples
+        if ":" in num_samples:
+            num_samples = list(range(*map(int, num_samples.split(":"))))
+        elif "," in num_samples:
+            num_samples = list(map(int, num_samples.split(",")))
+        else:
+            num_samples = [int(num_samples)]
+        return num_samples
+
+    @property
+    def method_name(self) -> str:
+        if hasattr(self.args, "bound_method"):
+            return self.args.bound_method
+        elif hasattr(self.args, "estimator"):
+            return self.args.estimator
+        else:
+            raise ValueError("No method name found.")
+
+    def out_file(self, local_output_dir: Path) -> Path:
+        if self.args.out_file is None:
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
+            out_file = local_output_dir / (
+                f"{self.args.model.stem}_{self.args.feature}_{self.args.output_feature}_shap"
+                f"_{self.method_name}_{self.args.shap_variant}_{timestamp}.csv"
+            )
+        else:
+            out_file = Path(self.args.out_file)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        return out_file
+
+    def __getattr__(self, name: str) -> Any:
+        if self.args is None:
+            raise AttributeError("Arguments not parsed yet. Call `parse_args()` first.")
+        return getattr(self.args, name)

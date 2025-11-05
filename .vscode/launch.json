@@ -17,7 +17,7 @@
             "type": "debugpy",
             "request": "launch",
             "module": "experiments.tabular.bound",
-            "args": ["--model", "experiments/tabular/resources/iris-mlp-32x2.eqx"],
+            "args": ["--model", "experiments/tabular/resources/iris-mlp-32x2.eqx", "--shap-variant", "marginal"],
             "justMyCode": false,
         },
         {
