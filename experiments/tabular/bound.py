@@ -51,7 +51,7 @@ if __name__ == "__main__":
         "--shap-variant",
         type=str,
         default="zero-baseline",
-        help="The SHAP variant to use. Options: zero-baseline, marginal-shap",
+        help="The SHAP variant to use. Options: zero-baseline, marginal",
     )
     parser.add_argument(
         "--bound-method",
@@ -101,7 +101,7 @@ if __name__ == "__main__":
         case "zero-baseline":
             baseline = jnp.zeros_like(x)
             value_fn = baseline_value(model, baseline, out_feature)
-        case "marginal-shap":
+        case "marginal":
             num_background = 100
             rng = np.random.default_rng(0)
             perm = rng.permutation(len(data))
