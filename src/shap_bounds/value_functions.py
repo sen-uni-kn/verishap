@@ -21,9 +21,9 @@ def baseline_value(
         output: The index of the output to explain.
     """
     baseline = jnp.expand_dims(baseline, axis=0)
+    x = jnp.expand_dims(sample, axis=0)
 
     def value(coalitions: Bool[Array, " b *n"]):
-        x = jnp.expand_dims(sample, axis=0)
         z = coalitions * x + (1 - coalitions) * baseline
         if output is not None:
             return model(z)[..., output]
@@ -80,7 +80,8 @@ def marginal_value(
     Args:
         model: The model to evaluate.
         sample: The sample to explain.
-        background_data: The background data, for example, samples from the training data.
+        background_data: The background data, for example,
+            samples from the training data.
         output: The index of the output to explain.
     """
     background: Real[Array, " 1 d *n"] = jnp.expand_dims(background_data, axis=0)
@@ -88,11 +89,56 @@ def marginal_value(
     model: Callable[[Real[Array, " b d *n"]], Real[Array, " b d m"]] = jax.vmap(
         model, in_axes=1, out_axes=1, axis_name="background"
     )
+    x: Real[Array, " 1 1 *n"] = jnp.expand_dims(sample, axis=(0, 1))
 
     def value(coalitions: Bool[Array, " b *n"]):
-        x: Real[Array, " 1 1 *n"] = jnp.expand_dims(sample, axis=(0, 1))
         coalitions: Real[Array, " b 1 *n"] = jnp.expand_dims(coalitions, axis=1)
         z: Real[Array, " b d *n"] = coalitions * x + (1 - coalitions) * background
+        out = jnp.mean(model(z), axis=1)
+        if output is not None:
+            return out[..., output]
+        else:
+            return out
+
+    return value
+
+
+def superfeature_marginal_value(
+    model: Callable[[Real[Array, " b *n"]], Real[Array, " b m"]],
+    sample: Real[Array, " *n"],
+    background_data: Real[Array, " d *n"],
+    masks: Bool[Array, " sf *n"],
+    output: int | None = None,
+) -> Callable[[Real[Array, " sf"], Bool[Array, " b sf"]], Real[Array, " b"]]:
+    """The marginal SHAP value function for superfeatures.
+
+    Args:
+        model: The model to evaluate.
+        sample: The sample to explain.
+        background_data: The background data, for example,
+            samples from the training data.
+        masks: The masks for the superfeatures in the input.
+        output: The index of the output to explain.
+
+    Returns:
+        A value function that reads a boolean vector indicating which
+        superfeatures are included and returns a scalar value.
+    """
+    in_ndim = sample.ndim
+    in_dims = tuple(range(-in_ndim, 0))
+
+    background: Real[Array, " 1 d *n"] = jnp.expand_dims(background_data, axis=0)
+    # add an extra batch axis for the background data
+    model: Callable[[Real[Array, " b d *n"]], Real[Array, " b d m"]] = jax.vmap(
+        model, in_axes=1, out_axes=1, axis_name="background"
+    )
+    x: Real[Array, " 1 1 *n"] = jnp.expand_dims(sample, axis=(0, 1))
+
+    def value(coalitions: Bool[Array, " b sf"]):
+        sf_coali: Bool[Array, " b sf *n"] = jnp.expand_dims(coalitions, axis=in_dims) * masks
+        sf_coali: Bool[Array, " b *n"] = sf_coali.sum(axis=1)
+        sf_coali: Real[Array, " b 1 *n"] = jnp.expand_dims(sf_coali, axis=1)
+        z: Real[Array, " b d *n"] = sf_coali * x + (1 - sf_coali) * background
         out = jnp.mean(model(z), axis=1)
         if output is not None:
             return out[..., output]

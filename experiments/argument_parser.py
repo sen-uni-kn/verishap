@@ -18,6 +18,7 @@ from shap_bounds import (
     marginal_value,
     shapley_bab,
     superfeature_baseline_value,
+    superfeature_marginal_value
 )
 
 from . import shaplib
@@ -169,20 +170,24 @@ class CmdArgs(ABC):
 
     @property
     def sample(self) -> np.ndarray:
-        return self.data[self.args.input]
+        return self.data[self.input]
 
     @property
     def background_data(self) -> np.ndarray:
-        num_background = self.args.num_background_samples
+        num_background = self.num_background_samples
         data = self.data
         rng = np.random.default_rng(0)
         perm = rng.permutation(len(data))
         return data[perm[:num_background]]
 
     @property
+    def base_mask(self) -> np.ndarray:
+        return jnp.ones_like(self.sample)
+
+    @property
     def value_function(self) -> Callable:
-        shap_variant = self.args.shap_variant
-        out_feature = self.args.output_feature
+        shap_variant = self.shap_variant
+        out_feature = self.output_feature
 
         masks = self.masks
         if masks is None and "superfeature" in shap_variant:
@@ -202,16 +207,12 @@ class CmdArgs(ABC):
                 return superfeature_baseline_value(
                     self.model, x, baseline, masks, out_feature
                 )
+            case "superfeature-marginal":
+                return superfeature_marginal_value(
+                    self.model, x, self.background_data, masks, out_feature
+                )
             case _:
                 raise ValueError(f"Unknown SHAP variant: {self.shap_variant}")
-
-    @property
-    def base_mask(self) -> np.ndarray:
-        if "superfeature" in self.args.shap_variant:
-            _, total_patches = self.num_patches
-            return jnp.ones(total_patches, dtype=jnp.float32)
-        else:
-            return self.sample
 
     @property
     def bound_method(self) -> Callable:

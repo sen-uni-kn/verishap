@@ -18,13 +18,14 @@ from ..argument_parser import CmdArgs
 from .models import CNN
 
 
-class NPDataset:
+class NumpyDataset:
     def __init__(self, dataset: torch.utils.data.Dataset):
         self.dataset = dataset
 
     def __getitem__(self, index) -> np.ndarray:
         data = self.dataset.data[index].numpy()
-        data = data.reshape(1, 28, 28) / 255.0
+        data = data.reshape(*data.shape[:-2], 1, 28, 28)
+        data = data / 255.0
         return data
 
     def __iter__(self) -> Iterator[np.ndarray]:
@@ -64,7 +65,7 @@ class MNISTCmdArgs(CmdArgs):
             download=True,
             transform=torchvision.transforms.ToTensor(),
         )
-        return NPDataset(testset)
+        return NumpyDataset(testset)
 
     @property
     def model(self) -> Callable:
@@ -122,18 +123,10 @@ class MNISTCmdArgs(CmdArgs):
         masks = jnp.arange(total_patches).reshape((total_patches, 1, 1, 1)) == mask_idx
         return masks
 
-    def out_file(self, local_output_dir: Path) -> Path:
-        if self.args.out_file is None:
-            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
-            out_file = (
-                local_output_dir
-                / f"{self.args.dataset}"
-                / (
-                    f"{self.args.model.stem}_{self.args.feature}_{self.args.output_feature}_shap"
-                    f"_{self.method_name}_{self.args.shap_variant}_{timestamp}.csv"
-                )
-            )
+    @property
+    def base_mask(self) -> np.ndarray:
+        if "superfeature" in self.shap_variant:
+            _, total_patches = self.num_patches
+            return jnp.ones(total_patches, dtype=jnp.float32)
         else:
-            out_file = Path(self.args.out_file)
-        out_file.parent.mkdir(parents=True, exist_ok=True)
-        return out_file
+            return jnp.ones_like(self.sample)
