@@ -6,7 +6,7 @@
     "configurations": [
 
         {
-            "name": "Python Debugger: experiments/mnist",
+            "name": "Python Debugger: experiments/mnist/bound.py",
             "type": "debugpy",
             "request": "launch",
             "module": "experiments.mnist.bound",
@@ -14,7 +14,19 @@
             "justMyCode": false,
         },
         {
-            "name": "Python Debugger: experiments/tabular",
+            "name": "Python Debugger: marginal-shap experiments/mnist/bound.py",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "experiments.mnist.bound",
+            "args": [
+                "--model", "experiments/mnist/resources/mnist-cnn-batchnorm.eqxparams", 
+                "--shap-variant", "marginal", 
+                "--num-patches", "4",
+            ],
+            "justMyCode": false,
+        },
+        {
+            "name": "Python Debugger: experiments/tabular/bound.py",
             "type": "debugpy",
             "request": "launch",
             "module": "experiments.tabular.bound",
