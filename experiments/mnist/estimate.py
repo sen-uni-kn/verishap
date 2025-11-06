@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from .argument_parser import TabularCmdArgs
+from .argument_parser import MNISTCmdArgs
 
 local_resoure_dir = Path(__file__).parent / "resources"
 local_output_dir = Path(__file__).parent / "output"
@@ -13,9 +13,10 @@ local_output_dir = Path(__file__).parent / "output"
 
 if __name__ == "__main__":
     args = (
-        TabularCmdArgs()
+        MNISTCmdArgs()
         .model_args(local_resoure_dir)
         .dataset_args()
+        .segmentation_args()
         .feature_args()
         .shap_variant_args()
         .estimator_args()

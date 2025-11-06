@@ -18,7 +18,7 @@ from shap_bounds import (
     marginal_value,
     shapley_bab,
     superfeature_baseline_value,
-    superfeature_marginal_value
+    superfeature_marginal_value,
 )
 
 from . import shaplib
