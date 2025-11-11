@@ -279,12 +279,30 @@ class CmdArgs(ABC):
             case _:
                 raise ValueError(f"Unknown SHAP estimator: {self.args.estimator}")
 
-        match self.args.shap_variant:
+        masks = self.masks
+        shap_variant = self.shap_variant
+        if masks is None and "superfeature" in shap_variant:
+            raise NotImplementedError(
+                "Superfeature value functions are not implemented for this experiment."
+            )
+
+        match shap_variant:
             case "zero-baseline":
                 baseline = jnp.zeros_like(self.sample)
                 estimator = partial(estimator, baseline, self.sample)
             case "marginal":
                 estimator = partial(estimator, self.background_data, self.sample)
+            case "superfeature-zero-baseline":
+                baseline = jnp.zeros_like(self.sample)
+                baseline = jnp.expand_dims(baseline, axis=0)
+                masker = shaplib.superfeature_masker(self.sample, baseline, masks)
+                x = jnp.ones(masks.shape[0], dtype=jnp.float32)
+                estimator = partial(estimator, masker, x)
+            case "superfeature-marginal":
+                masker = shaplib.superfeature_masker(
+                    self.sample, self.background_data, masks
+                )
+                estimator = partial(estimator, masker, self.sample)
             case _:
                 raise ValueError(f"Unknown SHAP variant: {self.args.shap_variant}")
 

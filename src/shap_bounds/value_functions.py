@@ -135,7 +135,9 @@ def superfeature_marginal_value(
     x: Real[Array, " 1 1 *n"] = jnp.expand_dims(sample, axis=(0, 1))
 
     def value(coalitions: Bool[Array, " b sf"]):
-        sf_coali: Bool[Array, " b sf *n"] = jnp.expand_dims(coalitions, axis=in_dims) * masks
+        sf_coali: Bool[Array, " b sf *n"] = (
+            jnp.expand_dims(coalitions, axis=in_dims) * masks
+        )
         sf_coali: Bool[Array, " b *n"] = sf_coali.sum(axis=1)
         sf_coali: Real[Array, " b 1 *n"] = jnp.expand_dims(sf_coali, axis=1)
         z: Real[Array, " b d *n"] = sf_coali * x + (1 - sf_coali) * background

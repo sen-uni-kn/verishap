@@ -205,7 +205,7 @@ def shapley_bab(
         coali_ub_ = jnp.reshape(coali_ub, (num_branches, -1))
 
         if split_strategy == "longest-edge":
-            edge_len = jnp.abs((coali_ub_ - coali_lb_) * x)
+            edge_len = jnp.abs(coali_ub_ - coali_lb_)
             split_axes = jnp.argmax(edge_len, axis=-1)
         elif split_strategy.startswith("strong-branching") or split_strategy.startswith(
             "smart-branching-ibp"

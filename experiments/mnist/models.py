@@ -12,6 +12,7 @@ class CNN(eqx.Module):
 
     Adapted from https://docs.kidger.site/equinox/examples/mnist/
     """
+
     layers: list
 
     def __init__(self, key):
@@ -32,7 +33,9 @@ class CNN(eqx.Module):
             eqx.nn.Linear(64, 10, key=key4),
         ]
 
-    def __call__(self, x: Float[Array, "1 28 28"] | Float[Array, "28 28"], state: PyTree) -> Float[Array, "10"]:
+    def __call__(
+        self, x: Float[Array, "1 28 28"] | Float[Array, "28 28"], state: PyTree
+    ) -> Float[Array, "10"]:
         for layer in self.layers:
             if isinstance(layer, eqx.nn.BatchNorm):
                 x, state = layer(x, state)

@@ -2,9 +2,7 @@
 """Utilities for parsing command line arguments for MNIST experiments."""
 
 from collections.abc import Iterable
-from datetime import datetime, timezone
 from functools import partial
-from pathlib import Path
 from typing import Callable, Iterator
 
 import equinox as eqx

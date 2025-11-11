@@ -2,7 +2,9 @@
 import numpy as np
 
 
-def corrgroups(num_features: int = 60, n_points: int = 1_000) -> tuple[np.ndarray, np.ndarray]:
+def corrgroups(
+    num_features: int = 60, n_points: int = 1_000
+) -> tuple[np.ndarray, np.ndarray]:
     """Correlated Groups Dataset from shap.
 
     This dataset is adapted from the `corrgroups60` dataset in the `shap` library.
@@ -49,11 +51,11 @@ def corrgroups(num_features: int = 60, n_points: int = 1_000) -> tuple[np.ndarra
 
     # set one coefficient from each group of 3 to 1
     beta = np.zeros(m)
-    beta[0:n//2:3] = 1
+    beta[0 : n // 2 : 3] = 1
 
     # build a correlation matrix with groups of 3 tightly correlated features
     c = np.eye(m)
-    for i in range(0, m//2, 3):
+    for i in range(0, m // 2, 3):
         c[i, i + 1] = c[i + 1, i] = 0.99
         c[i, i + 2] = c[i + 2, i] = 0.99
         c[i + 1, i + 2] = c[i + 2, i + 1] = 0.99
@@ -78,7 +80,9 @@ def corrgroups(num_features: int = 60, n_points: int = 1_000) -> tuple[np.ndarra
     return x, y
 
 
-def independentlinear(num_features: int = 60, n_points: int = 1_000) -> tuple[np.ndarray, np.ndarray]:
+def independentlinear(
+    num_features: int = 60, n_points: int = 1_000
+) -> tuple[np.ndarray, np.ndarray]:
     """Independent Linear Dataset from shap.
 
     This dataset is adapted from the `independentlinear60` dataset in the `shap` library.
@@ -122,7 +126,7 @@ def independentlinear(num_features: int = 60, n_points: int = 1_000) -> tuple[np
 
     # set one coefficient from each group of 3 to 1
     beta = np.zeros(m)
-    beta[0:n//2:3] = 1
+    beta[0 : n // 2 : 3] = 1
 
     # Make sure the sample correlation is a perfect match
     x_start = np.random.randn(n, m)
