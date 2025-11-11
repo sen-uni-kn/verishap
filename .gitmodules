@@ -1,3 +1,6 @@
 [submodule "formalax"]
 	path = dependencies/formalax
 	url = git@gitlab.inf.uni-konstanz.de:software-and-systems-engineering/research/formalax.git
+[submodule "dependencies/leverageshap"]
+	path = dependencies/leverageshap
+	url = git@github.com:cherrywoods/leverageshap.git
