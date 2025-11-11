@@ -21,6 +21,7 @@ from shap_bounds import (
     superfeature_marginal_value,
 )
 
+from .leverageshap import leverage_shap
 from . import shaplib
 
 
@@ -243,6 +244,7 @@ class CmdArgs(ABC):
         return bound_kwargs
 
     def estimator(self) -> Callable:
+        shap_variant = self.shap_variant
         match (
             self.args.estimator.lower()
             .replace("-", "")
@@ -274,13 +276,16 @@ class CmdArgs(ABC):
                     silent=True,
                 )
             case "leverageshap":
-                # TODO :)
-                pass
+                estimator = partial(
+                    leverage_shap,
+                    self.model,
+                )
+                if shap_variant != "zero-baseline":
+                    raise ValueError("Leverage SHAP only supports zero-baseline.")
             case _:
                 raise ValueError(f"Unknown SHAP estimator: {self.args.estimator}")
 
         masks = self.masks
-        shap_variant = self.shap_variant
         if masks is None and "superfeature" in shap_variant:
             raise NotImplementedError(
                 "Superfeature value functions are not implemented for this experiment."

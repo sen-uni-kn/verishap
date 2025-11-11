@@ -1,5 +1,4 @@
-#  Copyright (c) 2025. The Formalax Authors.
-#  Licensed under the MIT license.
+#  Copyright (c) 2025. David Boetius.
 from typing import Callable
 
 import jax
@@ -71,7 +70,9 @@ def exact_shap(
 
     explainer = shap.ExactExplainer(model, masker=masker)
     explanation = explainer(x, max_evals=num_samples, silent=silent)
-    return explanation.values[0]
+    shap_values = explanation.values
+    shap_values = np.moveaxis(shap_values, 0, -1)  # to: n_features x n_outputs
+    return shap_values
 
 
 def kernel_shap(model, baseline, x, num_samples=1024, silent=False):
@@ -80,8 +81,8 @@ def kernel_shap(model, baseline, x, num_samples=1024, silent=False):
         raise ValueError("KernelSHAP does not support callable maskers.")
 
     model = model_wrapper(model)
-    baseline, x = np.asarray(baseline), np.asarray(x)
-    baseline = np.atleast_2d(baseline)
+    x = np.asarray(x)
+    baseline = _preprocess_array(baseline)
 
     explainer = shap.KernelExplainer(model, data=baseline)
     shap_values = explainer.shap_values(
@@ -104,15 +105,20 @@ def permutation_shap(model, masker, x, num_samples=1024, silent=False):
     shap_values = explainer.shap_values(
         x, npermutations=num_permutations, silent=silent
     )
-    return shap_values[0]
+    shap_values = np.moveaxis(shap_values, 0, -1)  # to: n_features x n_outputs
+    return shap_values
 
 
-def sampling_shap(model, masker, x, num_samples=1024, silent=False):
+def sampling_shap(model, baseline, x, num_samples=1024, silent=False):
     """The Sampling SHAP explainer from the `shap` library."""
+    if isinstance(baseline, Callable):
+        raise ValueError("SamplingSHAP does not support callable baselines.")
+
     model = model_wrapper(model)
     x = _preprocess_array(x)
-    masker = _preprocess_masker(masker)
+    baseline = _preprocess_array(baseline)
 
-    explainer = shap.SamplingExplainer(model, masker=masker)
+    explainer = shap.SamplingExplainer(model, data=baseline)
     shap_values = explainer.shap_values(x, nsamples=num_samples, silent=silent)
+    shap_values = np.moveaxis(shap_values, 0, -1)  # to: n_features x n_outputs
     return shap_values
