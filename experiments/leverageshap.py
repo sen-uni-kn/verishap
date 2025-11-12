@@ -7,6 +7,8 @@ import leverageshap as ls
 import numpy as np
 from jaxtyping import Array, Real
 
+from .shaplib import _preprocess_array, _preprocess_masker
+
 
 class ModelWrapper:
     """Wraps a model to provide a .predict method that handles
@@ -23,12 +25,12 @@ class ModelWrapper:
 
 def leverage_shap(
     model: Callable[[Real[Array, " b *n"]], Real[Array, " b m"]],
-    baseline: Real[Array, " *n"],
+    masker: Callable | Real[Array, " *n"] | Real[Array, " d *n"],
     x: Real[Array, " *n"],
     num_samples: int | None = None,
 ):
     model = ModelWrapper(model)
-    x, baseline = np.asarray(x), np.asarray(baseline)
-    x, baseline = np.atleast_2d(x), np.atleast_2d(baseline)
+    x = _preprocess_array(x)
+    masker = _preprocess_masker(masker)
 
-    return ls.leverage_shap(baseline, x, model, num_samples)
+    return ls.leverage_shap(masker, x, model, num_samples)

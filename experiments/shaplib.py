@@ -29,13 +29,15 @@ def superfeature_masker(
     in_dims = tuple(range(-in_ndim, 0))
     sample: Real[Array, " 1 *n"] = jnp.expand_dims(sample, axis=0)
 
-    def masker(mask: Bool[Array, " sf"], x: Real[Array, " sf"]) -> Real[Array, " d *n"]:
-        sf_mask: Bool[Array, " sf *n"] = (
+    def masker(mask: Bool[Array, " b sf"], x: Real[Array, " sf"]) -> Real[Array, " b d *n"]:
+        # mask batch dimension is optional
+        n_batch = len(mask.shape) - 1
+        sf_mask: Bool[Array, " b sf *n"] = (
             jnp.expand_dims(mask, axis=in_dims) * superfeature_masks
         )
-        sf_mask: Bool[Array, " *n"] = sf_mask.sum(axis=0)
-        sf_mask: Real[Array, " 1 *n"] = jnp.expand_dims(sf_mask, axis=0)
-        z: Real[Array, " d *n"] = sf_mask * sample + (1 - sf_mask) * background_data
+        sf_mask: Bool[Array, " b *n"] = sf_mask.sum(axis=n_batch)
+        sf_mask: Real[Array, " b 1 *n"] = jnp.expand_dims(sf_mask, axis=n_batch)
+        z: Real[Array, " b d *n"] = sf_mask * sample + (1 - sf_mask) * background_data
         return z
 
     return masker

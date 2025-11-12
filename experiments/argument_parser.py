@@ -280,8 +280,6 @@ class CmdArgs(ABC):
                     leverage_shap,
                     self.model,
                 )
-                if shap_variant != "zero-baseline":
-                    raise ValueError("Leverage SHAP only supports zero-baseline.")
             case _:
                 raise ValueError(f"Unknown SHAP estimator: {self.args.estimator}")
 
