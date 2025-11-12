@@ -31,7 +31,7 @@ class BranchData:
 
 def contribution(
     value_fn: Callable[
-        [Real[Array, " *shape"], Real[Array, " b *shape"]], Real[Array, " b"]
+        [Real[Array, " b *shape"]], Real[Array, " b"]
     ],
     base_mask: Real[Array, " *shape"],
     feature: tuple[int, ...],
@@ -52,7 +52,7 @@ def contribution(
     include_feature = jnp.zeros_like(base_mask)  # use float dtypes for computing bounds
     include_feature = include_feature.at[feature].set(1.0)
 
-    def contrib(coalition: Real[Array, " b *shape"]):
+    def contrib(coalition: Real[Array, " b *shape"]) -> Real[Array, " b"]:
         """Computes (v(S + {i}) - v(S))."""
         # these are floats, so we can't use bitwise_or
         one = jnp.ones_like(coalition)
@@ -65,9 +65,27 @@ def contribution(
     return contrib
 
 
+def smears(
+    contribution_fn: Callable[
+        [Real[Array, " b *shape"]], Real[Array, " b"]
+    ],
+    compute_bounds=ibp,
+):
+    def single_contrib(coalition: Real[Array, " *shape"]) -> Real[Array, ""]:
+        coalitions = jnp.expand_dims(coalition, axis=0)
+        contrib = contribution_fn(coalitions)
+        return contrib.squeeze()
+
+    contrib_grads: Callable[
+        [Real[Array, " b *shape"]], Real[Array, " b *shape"]
+    ] = jax.vmap(jax.grad(single_contrib))
+    smears = compute_bounds(contrib_grads)
+    return smears
+
+
 def shapley_bab(
     value_fn: Callable[
-        [Real[Array, " *shape"], Real[Array, " b *shape"]], Real[Array, " b"]
+        [Real[Array, " b *shape"]], Real[Array, " b"]
     ],
     base_mask: Real[Array, " *shape"],
     feature: tuple[int, ...],
@@ -76,6 +94,8 @@ def shapley_bab(
     select_strategy: Literal["max-diam", "min-diam", "first"] = "max-diam",
     split_strategy: Literal[
         "longest-edge",
+        "smears",
+        "lirpa-weights",
         "strong-branching-better",
         "strong-branching-worse",
         "smart-branching-ibp-better",
@@ -104,8 +124,10 @@ def shapley_bab(
                 Can have arbitrary values but needs to have the correct shape.
             feature: Index of the feature for which to compute the Shapley value.
             select_strategy: The strategy to use for selecting branches.
-                - "max-diam": Select the branch with the largest difference between upper and lower bound.
-                - "min-diam": Select the branch with the smallest difference between upper and lower bound.
+                - "max-diam": Select the branch with the largest difference between
+                              upper and lower bound.
+                - "min-diam": Select the branch with the smallest difference between
+                              upper and lower bound.
             split_strategy: The strategy to use for splitting branches.
             batch_size: The batch size to use for the branch and bound.
             jit: Whether to just-in-time compile the branch evaluation.
@@ -129,6 +151,7 @@ def shapley_bab(
     contrib = contribution(value_fn, base_mask, feature)
     bound_contrib = compute_bounds(contrib)
     fast_bound_contrib = fast_compute_bounds(contrib)
+    contrib_smears = smears(contrib)
 
     def select(branches: BranchData):
         num_branches = len(branches.shapley_ub)
@@ -207,6 +230,17 @@ def shapley_bab(
         if split_strategy == "longest-edge":
             edge_len = jnp.abs(coali_ub_ - coali_lb_)
             split_axes = jnp.argmax(edge_len, axis=-1)
+        elif split_strategy == "smears":
+            grad_lbs, grad_ubs = contrib_smears(branches.coalitions).concrete
+            smears_ = jnp.maximum(jnp.abs(grad_lbs), jnp.abs(grad_ubs))
+            smears_ = smears_ * jnp.abs(coali_ub_ - coali_lb_)
+            split_axes = jnp.argmax(smears_, axis=-1)
+        elif split_strategy == "lirpa-weights":
+            lirpa_bounds = bound_contrib(branches.coalitions)
+            lb_weights = lirpa_bounds.lb_weights[0]
+            ub_weights = lirpa_bounds.ub_weights[0]
+            influence = jnp.maximum(jnp.abs(lb_weights), jnp.abs(ub_weights))
+            split_axes = jnp.argmax(influence, axis=-1)
         elif split_strategy.startswith("strong-branching") or split_strategy.startswith(
             "smart-branching-ibp"
         ):
