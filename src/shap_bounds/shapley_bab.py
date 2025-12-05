@@ -240,6 +240,7 @@ def shapley_bab(
             lb_weights = lirpa_bounds.lb_weights[0]
             ub_weights = lirpa_bounds.ub_weights[0]
             influence = jnp.maximum(jnp.abs(lb_weights), jnp.abs(ub_weights))
+            influence = influence * jnp.abs(coali_ub_ - coali_lb_)
             split_axes = jnp.argmax(influence, axis=-1)
         elif split_strategy.startswith("strong-branching") or split_strategy.startswith(
             "smart-branching-ibp"
