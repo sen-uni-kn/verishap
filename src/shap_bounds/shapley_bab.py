@@ -30,9 +30,7 @@ class BranchData:
 
 
 def contribution(
-    value_fn: Callable[
-        [Real[Array, " b *shape"]], Real[Array, " b"]
-    ],
+    value_fn: Callable[[Real[Array, " b *shape"]], Real[Array, " b"]],
     base_mask: Real[Array, " *shape"],
     feature: tuple[int, ...],
 ):
@@ -66,9 +64,7 @@ def contribution(
 
 
 def smears(
-    contribution_fn: Callable[
-        [Real[Array, " b *shape"]], Real[Array, " b"]
-    ],
+    contribution_fn: Callable[[Real[Array, " b *shape"]], Real[Array, " b"]],
     compute_bounds=ibp,
 ):
     def single_contrib(coalition: Real[Array, " *shape"]) -> Real[Array, ""]:
@@ -76,17 +72,15 @@ def smears(
         contrib = contribution_fn(coalitions)
         return contrib.squeeze()
 
-    contrib_grads: Callable[
-        [Real[Array, " b *shape"]], Real[Array, " b *shape"]
-    ] = jax.vmap(jax.grad(single_contrib))
+    contrib_grads: Callable[[Real[Array, " b *shape"]], Real[Array, " b *shape"]] = (
+        jax.vmap(jax.grad(single_contrib))
+    )
     smears = compute_bounds(contrib_grads)
     return smears
 
 
 def shapley_bab(
-    value_fn: Callable[
-        [Real[Array, " b *shape"]], Real[Array, " b"]
-    ],
+    value_fn: Callable[[Real[Array, " b *shape"]], Real[Array, " b"]],
     base_mask: Real[Array, " *shape"],
     feature: tuple[int, ...],
     compute_bounds=crown_ibp,
