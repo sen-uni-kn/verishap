@@ -161,7 +161,7 @@ class PriorityBranchStore[D: PyTree]:
             self.__nodes.append(buf3)
             heapify(len(self.__nodes) - 1)
 
-    def extract_max(self) -> D:
+    def extract_max(self, return_size: bool = False) -> tuple[D, int]:
         """Returns the data with the highest priority as a batch of size ``batch_size``.
 
         If there are fewer than ``batch_size`` branches in the queue,
@@ -178,8 +178,13 @@ class PriorityBranchStore[D: PyTree]:
             self.__nodes[0], self.__buffer = self._split_sort(tmp_root, self.__buffer)
             self._heapify_down(0)
 
-        self.__size -= data[0].shape[0]
-        return jax.tree.unflatten(self.pytree, data)
+        removed_size = data[0].shape[0]
+        self.__size -= removed_size
+        out = jax.tree.unflatten(self.pytree, data)
+        if return_size:
+            return out, removed_size
+        else:
+            return out
 
     def _split_sort(
         self, left: _HeapNode, right: _HeapNode

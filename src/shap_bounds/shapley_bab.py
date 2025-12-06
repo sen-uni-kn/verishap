@@ -9,8 +9,7 @@ import numpy as np
 from formalax import Box, crown_ibp, ibp
 from jaxtyping import Array, Int, Real
 
-from .branch_store import BranchStore
-from .utils import argmax_k, argmin_k
+from .priority_branch_store import PriorityBranchStore
 
 
 @jax.tree_util.register_dataclass
@@ -85,7 +84,7 @@ def shapley_bab(
     feature: tuple[int, ...],
     compute_bounds=crown_ibp,
     fast_compute_bounds=ibp,
-    select_strategy: Literal["max-diam", "min-diam", "first"] = "max-diam",
+    select_strategy: Literal["max-diam", "min-diam", "fifo", "lifo"] = "max-diam",
     split_strategy: Literal[
         "longest-edge",
         "smears",
@@ -146,23 +145,6 @@ def shapley_bab(
     bound_contrib = compute_bounds(contrib)
     fast_bound_contrib = fast_compute_bounds(contrib)
     contrib_smears = smears(contrib)
-
-    def select(branches: BranchData):
-        num_branches = len(branches.shapley_ub)
-        select_size = min(batch_size, num_branches)
-
-        if select_strategy == "first":
-            indices = jnp.arange(select_size)
-            return jnp.zeros((num_branches,), dtype=bool).at[indices].set(True)
-
-        score = branches.shapley_ub - branches.shapley_lb
-        match select_strategy:
-            case "max-diam":
-                return argmax_k(score, select_size)
-            case "min-diam":
-                return argmin_k(score, select_size)
-            case _:
-                raise ValueError(f"Invalid select strategy: {select_strategy}")
 
     def compute_bounds(
         coalitions: Box[Real[Array, " b *shape"]],
@@ -318,6 +300,20 @@ def shapley_bab(
             out = jax.tree.map(unpad, out_padded)
             return out
 
+    branch_counter = it.count()
+
+    def selection_priority(branches: BranchData):
+        """Computes the priority of branches that determine the order of selection."""
+        match select_strategy:
+            case "fifo" | "lifo":
+                scores = jnp.array([next(branch_counter) for _ in range(len(branches))])
+                return scores if select_strategy == "lifo" else -scores
+            case "max-diam" | "min-diam":
+                diameters = branches.shapley_ub - branches.shapley_lb
+                return diameters if select_strategy == "max-diam" else -diameters
+            case _:
+                raise ValueError(f"Invalid select strategy: {select_strategy}")
+
     # Root branch
     without_feature = jnp.ones_like(base_mask).at[feature].set(0.0)
     all_coalitions = Box(
@@ -339,18 +335,35 @@ def shapley_bab(
         shapley_ub,
     )
 
-    branches: BranchStore = BranchStore(root_data)
     shapley_lb, shapley_ub = root_data.shapley_lb, root_data.shapley_ub
+    yield Box(shapley_lb.squeeze(), shapley_ub.squeeze())
+    branches: PriorityBranchStore[BranchData] = PriorityBranchStore(
+        selection_priority(root_data), root_data, batch_size
+    )
     for i in it.count():
+        if len(branches) == 0 or jnp.isclose(shapley_lb, shapley_ub):
+            return None
+
+        batch, num_selected = branches.extract_max(return_size=True)
+        # Subtract here, since we will refine the bounds for batch
+        shapley_lb = shapley_lb - batch.shapley_lb.sum()
+        shapley_ub = shapley_ub - batch.shapley_ub.sum()
+
+        new_branches = bab_step(batch, num_selected)
+
+        shapley_lb = shapley_lb + new_branches.shapley_lb.sum()
+        shapley_ub = shapley_ub + new_branches.shapley_ub.sum()
+        yield Box(shapley_lb.squeeze(), shapley_ub.squeeze())
+
         # Prune completely split branches
-        coali_lb, coali_ub = branches.data.coalitions
+        coali_lb, coali_ub = new_branches.coalitions
         single_coalition = (coali_lb == coali_ub).all(axis=data_axes)
         # Also prune branches with tight value bounds
-        tight_bounds = jnp.isclose(branches.data.contrib_ub, branches.data.contrib_lb)
+        tight_bounds = jnp.isclose(new_branches.contrib_ub, new_branches.contrib_lb)
         # shapley bounds from the pruned branches remain part of the global bounds
-        branches.pop(single_coalition | tight_bounds)
-
-        yield Box(shapley_lb.squeeze(), shapley_ub.squeeze())
+        keep = ~(single_coalition | tight_bounds)
+        new_branches = jax.tree.map(lambda a: a[keep], new_branches)  # noqa: B023
+        branches.insert(selection_priority(new_branches), new_branches)
 
         if log:
             num_branches = len(branches)
@@ -362,17 +375,3 @@ def shapley_bab(
                 f"[i: {i:3d}] S ∈ [{mid:8.4f} ± {ran:8.4f}]\t|"
                 f" {num_branches} branches, pruned: {num_tight} tight, {num_fully_split} fully split"
             )
-
-        if len(branches) == 0 or jnp.isclose(shapley_lb, shapley_ub):
-            return None
-
-        selected = select(branches.data)
-        batch = branches.pop(selected)
-        # Subtract here, since we will refine the bounds for batch
-        shapley_lb = shapley_lb - batch.shapley_lb.sum()
-        shapley_ub = shapley_ub - batch.shapley_ub.sum()
-
-        new_branches = bab_step(batch, selected.sum())
-        branches.add(new_branches)
-        shapley_lb = shapley_lb + new_branches.shapley_lb.sum()
-        shapley_ub = shapley_ub + new_branches.shapley_ub.sum()
