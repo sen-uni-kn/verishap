@@ -1,6 +1,8 @@
 # Copyright 2025 David Boetius
 import itertools as it
 from dataclasses import dataclass
+from functools import partial
+from time import perf_counter
 from typing import Callable, Literal
 
 import jax
@@ -277,15 +279,26 @@ def shapley_bab(
             new_shapley_ubs,
         )
 
+    def to_prune(branches: BranchData, num_branches: int):
+        """These steps can be awefully slow for some reason if not jitted."""
+        # Prune completely split branches
+        coali_lb, coali_ub = branches.coalitions
+        single_coalition = (coali_lb == coali_ub).all(axis=data_axes)
+        # Also prune branches with tight value bounds
+        tight_bounds = jnp.isclose(branches.contrib_ub, branches.contrib_lb)
+        prune = single_coalition | tight_bounds
+        return prune, single_coalition, tight_bounds
+
     if jit:
         bab_step_jit = jax.jit(bab_step, static_argnums=(1,))
+        to_prune_jit = jax.jit(to_prune, static_argnums=(1,))
+
+        def pad(x, padding: int):
+            pad_val = jnp.empty((padding, *x.shape[1:]), dtype=x.dtype)
+            return jnp.concat([x, pad_val], axis=0)
 
         def bab_step(batch: BranchData, num_branches: int):
             padding = batch_size - num_branches
-
-            def pad(x):
-                pad_val = jnp.empty((padding, *x.shape[1:]), dtype=x.dtype)
-                return jnp.concat([x, pad_val], axis=0)
 
             def unpad(x_padded):
                 # the values that we unpad have twice the batch size
@@ -295,10 +308,20 @@ def shapley_bab(
                 right = x_padded[batch_size : batch_size + num_branches]
                 return jnp.concat([left, right], axis=0)
 
-            padded = jax.tree.map(pad, batch)
+            padded = jax.tree.map(partial(pad, padding=padding), batch)
             out_padded = bab_step_jit(padded, num_branches=batch_size)
             out = jax.tree.map(unpad, out_padded)
             return out
+
+        def to_prune(branches: BranchData, num_branches: int):
+            padding = 2 * batch_size - num_branches
+
+            def unpad(x_padded):
+                return x_padded[:num_branches]
+
+            padded = jax.tree.map(partial(pad, padding=padding), branches)
+            res = to_prune_jit(padded, num_branches=batch_size)
+            return jax.tree.map(unpad, res)
 
     branch_counter = it.count()
 
@@ -345,6 +368,7 @@ def shapley_bab(
             return None
 
         batch, num_selected = branches.extract_max(return_size=True)
+
         # Subtract here, since we will refine the bounds for batch
         shapley_lb = shapley_lb - batch.shapley_lb.sum()
         shapley_ub = shapley_ub - batch.shapley_ub.sum()
@@ -355,15 +379,11 @@ def shapley_bab(
         shapley_ub = shapley_ub + new_branches.shapley_ub.sum()
         yield Box(shapley_lb.squeeze(), shapley_ub.squeeze())
 
-        # Prune completely split branches
-        coali_lb, coali_ub = new_branches.coalitions
-        single_coalition = (coali_lb == coali_ub).all(axis=data_axes)
-        # Also prune branches with tight value bounds
-        tight_bounds = jnp.isclose(new_branches.contrib_ub, new_branches.contrib_lb)
         # shapley bounds from the pruned branches remain part of the global bounds
-        keep = ~(single_coalition | tight_bounds)
-        new_branches = jax.tree.map(lambda a: a[keep], new_branches)  # noqa: B023
-        branches.insert(selection_priority(new_branches), new_branches)
+        num_branches = new_branches.contrib_lb.shape[0]
+        prune, single_coalition, tight_bounds = to_prune(new_branches, num_branches)
+        pruned = jax.tree.map(lambda a: a[~prune], new_branches)  # noqa: B023
+        branches.insert(selection_priority(pruned), pruned)
 
         if log:
             num_branches = len(branches)
