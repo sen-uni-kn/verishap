@@ -66,7 +66,7 @@ class CmdArgs(ABC):
         self.parser.add_argument(
             "--feature",
             type=int,
-            default=0,
+            default=None,
             help="The index of the input feature to compute SHAP bounds for.",
         )
         self.parser.add_argument(
