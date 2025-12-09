@@ -277,11 +277,6 @@ def shapley_bab(
         else:
             raise ValueError(f"Invalid split strategy: {split_strategy}")
 
-        # grad_lbs, grad_ubs = compute_smears(branches.coalitions)
-        # smears = jnp.maximum(jnp.abs(grad_lbs), jnp.abs(grad_ubs))
-        # smears = jnp.reshape(smears, (smears.shape[0], -1))
-        # # already fixed features have smears of 0
-        # split_axes = jnp.argmax(smears, axis=1)
         return split_axes
 
     def bab_step(batch: BranchData, num_branches: int):
