@@ -103,9 +103,11 @@ class MNISTCmdArgs(CmdArgs):
     def feature(self) -> tuple[int, ...]:
         in_feature = self.args.feature
         num_patches, _ = self.num_patches
+        if in_feature is None:
+            return None
         try:
             in_feature = int(in_feature)
-        except ValueError:
+        except TypeError:
             in_feature = tuple(int(x) for x in in_feature.split(","))
             in_feature = in_feature[0] * num_patches[0] + in_feature[1]
         return in_feature

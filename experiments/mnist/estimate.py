@@ -28,12 +28,18 @@ if __name__ == "__main__":
 
     estimates = []
     for n in tqdm(num_samples):
-        estimate = estimator(num_samples=n)
-        estimate = estimate[in_feature, out_feature]
-        estimates.append({"num_samples": n, "estimate": estimate.item()})
+        estims = estimator(num_samples=n)
+        if in_feature is None:
+            estims = estims[:, out_feature].squeeze()
+            estims = {i: v for i, v in enumerate(estims)}
+        else:
+            estim = estims[in_feature, out_feature]
+            estims = {in_feature: estim}
+        estimates.append({"num_samples": n, **estims})
 
     estimates = pd.DataFrame(estimates)
     print(estimates)
-    print("Best Estimate: ", estimates.iloc[-1]["estimate"])
+    print("Best Estimate:")
+    print(estimates.iloc[-1])
 
     estimates.to_csv(args.out_file(local_output_dir), index=False)

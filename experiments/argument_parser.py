@@ -16,7 +16,7 @@ import torch
 from shap_bounds import (
     baseline_value,
     marginal_value,
-    shapley_bab,
+    multi_shap_bab,
     superfeature_baseline_value,
     superfeature_marginal_value,
 )
@@ -220,7 +220,7 @@ class CmdArgs(ABC):
         match self.args.bound_method.lower():
             case "bab":
                 res = partial(
-                    shapley_bab,
+                    multi_shap_bab,
                     self.value_function,
                     self.base_mask,
                     self.feature,
