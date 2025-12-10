@@ -44,7 +44,7 @@ def smears(
     return smears
 
 
-def shapley_bab(
+def multi_shap_bab(
     value_fn: Callable[[Real[Array, " b *shape"]], Real[Array, " b"]],
     base_mask: Real[Array, " *shape"],
     features: Sequence[tuple[int, ...]] | None = None,
@@ -109,6 +109,8 @@ def shapley_bab(
     if features is None:
         features = jnp.indices(base_mask.shape).reshape(base_mask.ndim, -1).T
         features = [tuple(f) for f in features.tolist()]
+    elif isinstance(features, int):
+        features = [features]
     data_axes = tuple(range(1, base_mask.ndim + 1))
 
     bound_value = compute_bounds(value_fn)
@@ -137,20 +139,7 @@ def shapley_bab(
         left_ub = jnp.reshape(left_ub, coali_lb.shape)
         right_lb = jnp.reshape(right_lb, coali_lb.shape)
 
-        num_splits = branches.num_splits
-        # The coalition weights assume one feature is excluded for
-        # which the Shapley value is computed.
-        # However, num_splits is the overall number of splits starting
-        # from the entire feature space.
-        # This is one larger than the proper value of `s` for computing
-        # the coalition weights.
-        # For the formula below to work out, we set the initial total_coaliw
-        # for the entire feature space to 2.
-        # With taking s = min(num_splits - 1, 0), that produces the
-        # right coalition weights for num_splits=2.
-        # Same for the number of included features (r).
-        s = jnp.maximum(num_splits - 1, jnp.zeros_like(num_splits))
-        r = jnp.maximum(coali_lb_.sum(axis=-1), s)
+        s, r = branches.num_splits, coali_lb_.sum(axis=-1)
         old_total_coaliw = branches.total_coalition_weight
         # left branch is exclude branch
         left_total_coaliw = (s + 1 - r) / (s + 2) * old_total_coaliw
@@ -297,8 +286,7 @@ def shapley_bab(
         jnp.ones((1,) + base_mask.shape, dtype=base_mask.dtype),
     )
     zero_depth = jnp.zeros((1,), dtype=int)
-    # refined to 1.0 for all branches in the first iteration
-    total_coaliw = 2 * jnp.ones((1,), dtype=base_mask.dtype)
+    total_coaliw = jnp.ones((1,), dtype=base_mask.dtype)
     value_lb, value_ub = bound_value(all_coalitions).concrete
     root_data = BranchData(all_coalitions, value_lb, value_ub, zero_depth, total_coaliw)
 
@@ -321,16 +309,40 @@ def shapley_bab(
         coali_lb, coali_ub = branches.coalitions
         val_lb, val_ub = branches.value_lb, branches.value_ub
 
-        # feature not necessarily excluded
-        not_excluded: Real[Array, " f b"]
-        not_excluded = (coali_ub >= with_features).all(axis=data_axes2)
-        # feature not necessarily included
-        not_included = (coali_lb <= without_features).all(axis=data_axes2)
+        # branches where all sets contain the feature (i)
+        with_i: Real[Array, " f b"]
+        with_i = (coali_lb >= with_features).all(axis=data_axes2)
+        # branches where all sets do not contain the feature
+        without_i = (coali_ub <= without_features).all(axis=data_axes2)
+        # branches where some sets contain the feature and some do not
+        both = ~(with_i | without_i)
 
-        wv_lb = val_lb * branches.total_coalition_weight
-        wv_ub = val_ub * branches.total_coalition_weight
-        contrib_lb = (val_lb * not_excluded - val_ub * not_included).sum(axis=-1)
-        contrib_ub = (wv_ub * not_excluded - wv_lb * not_included).sum(axis=-1)
+        # The coalition weights in branches are for all features, while
+        # we need coalition weights for one feature (i) excluded.
+        # The coalition weights for the with_i branches include one
+        # feature too much, while the coalition weights for the
+        # without_i branches exclude one feature too much.
+        # The "both" branches already have the correct coalition weights.
+        s, r = branches.num_splits, coali_lb.sum(axis=data_axes)
+        sum_coaliw = branches.total_coalition_weight
+        # Reduce number of included features by one
+        sum_coaliw_with_i = (s + 1) / r * sum_coaliw
+        # Reduce number of excluded features by one
+        sum_coaliw_without_i = (s + 1) / (s - r) * sum_coaliw
+
+        # Computing bounds on: sum lambda * v(S + {i}) - sum lambda * v(S)
+        contrib_lb = (
+            sum_coaliw_with_i * val_lb * with_i
+            + sum_coaliw * val_lb * both
+            - sum_coaliw * val_ub * both
+            - sum_coaliw_without_i * val_ub * without_i
+        ).sum(axis=-1)
+        contrib_ub = (
+            sum_coaliw_with_i * val_ub * with_i
+            + sum_coaliw * val_ub * both
+            - sum_coaliw * val_lb * both
+            - sum_coaliw_without_i * val_lb * without_i
+        ).sum(axis=-1)
         return Box(contrib_lb, contrib_ub)
 
     shap_lbs, shap_ubs = shap_bounds(root_data)
@@ -341,16 +353,12 @@ def shapley_bab(
 
         batch, num_selected = branches.extract_max(return_size=True)
 
-        print("Before", batch.total_coalition_weight)
-
         # Subtract here, since we will refine the bounds for batch
         batch_shap_lbs, batch_shap_ubs = shap_bounds(batch)
         shap_lbs = shap_lbs - batch_shap_lbs
         shap_ubs = shap_ubs - batch_shap_ubs
 
         new_branches = bab_step(batch, num_selected)
-
-        print("After", new_branches.total_coalition_weight)
 
         new_shap_lbs, new_shap_ubs = shap_bounds(new_branches)
         shap_lbs = shap_lbs + new_shap_lbs
@@ -370,8 +378,10 @@ def shapley_bab(
             lbs, ubs = shap_lbs, shap_ubs
             mid, ran = (lbs + ubs) / 2, (ubs - lbs) / 2
             mid, ran = mid.tolist(), ran.tolist()
-            print(f"[i: {i:3d}] Branches: {num_branches}, Pruned: {num_tight} tight, {num_fully_split} fully split")
-            bounds = ", ".join(
-                [f"{m:.4f} ± {r:.4f}" for m, r in zip(mid, ran, strict=True)]
+            print(
+                f"[i: {i:3d}] Branches: {num_branches}, Pruned: {num_tight} tight, {num_fully_split} fully split"
             )
-            print(f"    φ ∈ [{bounds}]")
+            mids = ", ".join(f"{m:8.4f}" for m in mid)
+            rans = ", ".join(f"{r:8.4f}" for r in ran)
+            print(f"    φ ∈ [{mids}]")
+            print(f"      ± [{rans}]")
