@@ -35,10 +35,11 @@ class CNN(eqx.Module):
 
     def __call__(
         self, x: Float[Array, "3 32 32"], state: PyTree
-    ) -> Float[Array, "1"]:
+    ) -> tuple[Float[Array, ""], PyTree]:
         for layer in self.layers:
             if isinstance(layer, eqx.nn.BatchNorm):
                 x, state = layer(x, state)
             else:
                 x = layer(x)
+        x = x.squeeze(axis=-1)
         return x, state

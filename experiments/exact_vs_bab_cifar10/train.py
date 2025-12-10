@@ -12,18 +12,19 @@ from jaxtyping import Array, Bool, Float, Int, PyTree
 from optax.losses import sigmoid_binary_cross_entropy
 from torch.utils.data import DataLoader
 
-from .model import CNN
+from .resnet import resnet18
 
 # ==============================================================================
 # Hyperparameters
 # ==============================================================================
 
-BATCH_SIZE = 256
-LEARNING_RATE = 3e-4
+BATCH_SIZE = 64
+LEARNING_RATE = 1e-4
 EPOCHS = 10
 PRINT_EVERY = 100
 SEED = 1939
-OUT_FILE = "cifar10-cnn.eqxparams"
+OUT_FILE = "cifar10-resnet18.eqxparams"
+MODEL_CLS = resnet18
 
 if __name__ == "__main__":
     key = jax.random.PRNGKey(SEED)
@@ -54,7 +55,7 @@ if __name__ == "__main__":
     # ==============================================================================
 
     key, subkey = jax.random.split(key, 2)
-    model, state = eqx.nn.make_with_state(CNN)(subkey)
+    model, state = eqx.nn.make_with_state(MODEL_CLS)(subkey)
 
     print("=" * 80)
     print("Model:")
@@ -82,7 +83,7 @@ if __name__ == "__main__":
 
     @eqx.filter_jit
     def accuracy(
-        model: CNN,
+        model: MODEL_CLS,
         state: PyTree,
         x: Float[Array, "batch 3 32 32"],
         y: Int[Array, " batch"],
@@ -100,7 +101,7 @@ if __name__ == "__main__":
 
     @eqx.filter_jit
     def loss(
-        model: CNN,
+        model: MODEL_CLS,
         state: PyTree,
         x: Float[Array, "batch 3 32 32"],
         y: Int[Array, " batch"],
@@ -113,7 +114,7 @@ if __name__ == "__main__":
         loss = sigmoid_binary_cross_entropy(pred_y, y).mean()
         return loss, state
 
-    def evaluate(model: CNN, state: PyTree, loader: DataLoader) -> tuple[float, float]:
+    def evaluate(model: MODEL_CLS, state: PyTree, loader: DataLoader) -> tuple[float, float]:
         """Computes average loss and accuracy over a dataset."""
         inference_model = eqx.nn.inference_mode(model)
         loss_val = 0.0
@@ -125,19 +126,19 @@ if __name__ == "__main__":
         return loss_val / len(loader), acc_val / len(loader)
 
     def train(
-        model: CNN,
+        model: MODEL_CLS,
         state: PyTree,
         train_loader: DataLoader,
         test_loader: DataLoader,
         optim: optax.GradientTransformation,
         epochs: int,
         print_every: int,
-    ) -> CNN:
+    ) -> MODEL_CLS:
         opt_state = optim.init(eqx.filter(model, eqx.is_array))
 
         @eqx.filter_jit
         def train_step(
-            model: CNN,
+            model: MODEL_CLS,
             state: PyTree,
             opt_state: PyTree,
             x: Float[Array, "batch 3 32 32"],
