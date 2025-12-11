@@ -1,7 +1,5 @@
 # Copyright 2025 David Boetius
 # Adapted from https://docs.kidger.site/equinox/examples/mnist/
-import itertools as it
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -12,7 +10,7 @@ from jaxtyping import Array, Bool, Float, Int, PyTree
 from optax.losses import sigmoid_binary_cross_entropy
 from torch.utils.data import DataLoader
 
-from .resnet import resnet18
+from .mlp import MLP
 
 # ==============================================================================
 # Hyperparameters
@@ -23,8 +21,8 @@ LEARNING_RATE = 1e-4
 EPOCHS = 10
 PRINT_EVERY = 100
 SEED = 1939
-OUT_FILE = "cifar10-resnet18.eqxparams"
-MODEL_CLS = resnet18
+OUT_FILE = "cifar10-mlp.eqxparams"
+MODEL_CLS = MLP
 
 if __name__ == "__main__":
     key = jax.random.PRNGKey(SEED)
