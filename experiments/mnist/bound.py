@@ -2,7 +2,8 @@
 import itertools as it
 from pathlib import Path
 
-import pandas as pd
+from shap_bounds.logger import ConsoleLogger, FileLogger, JoinLoggers
+from shap_bounds.timer import Timer
 
 from .argument_parser import MNISTCmdArgs
 
@@ -13,41 +14,27 @@ local_output_dir = Path(__file__).parent / "output"
 if __name__ == "__main__":
     args = (
         MNISTCmdArgs()
-        .model_args(local_resoure_dir)
+        .model_args(local_resoure_dir / "mnist-cnn-batchnorm.eqxparams")
         .dataset_args()
         .segmentation_args()
         .feature_args()
         .shap_variant_args()
         .bound_method_args()
-        .out_file_args()
+        .logger_args()
+        .out_args()
         .parse_args()
     )
     in_feature = args.feature
 
-    bounds_iter = args.bound_method()
-    iters = range(args.max_iters) if args.max_iters is not None else it.count()
-    bounds = []
-    for (lb, ub), _ in zip(bounds_iter, iters, strict=False):
-        if in_feature is not None:
-            bounds.append({"lb": lb.item(), "ub": ub.item()})
-        else:
-            bounds.append(
-                {(i, "lb"): lb_.item() for i, lb_ in enumerate(lb)}
-                | {(i, "ub"): ub_.item() for i, ub_ in enumerate(ub)}
-            )
+    loggers = [] if args.silent else [ConsoleLogger()]
+    timer = Timer()
 
-    if in_feature is not None:
-        bounds = pd.DataFrame(bounds)
-    else:
-        columns = pd.MultiIndex.from_product(
-            [[i for i in range(len(lb))], ["lb", "ub"]], names=["feature", "bound"]
-        )
-        bounds = pd.DataFrame(bounds, columns=columns)
-    print(bounds)
-    print("Best Bounds:")
-    if in_feature is not None:
-        print(bounds.iloc[-1])
-    else:
-        print(bounds.iloc[-1].unstack(level=1))
+    with FileLogger(args.out_dir(local_output_dir)) as file_logger:
+        logger = JoinLoggers(*loggers, file_logger)
 
-    bounds.to_csv(args.out_file(local_output_dir), index="iteration")
+        with timer["overall"]:
+            bounds_iter = args.bound_method(logger)()
+            iters = range(args.max_iters) if args.max_iters is not None else it.count()
+            list(zip(bounds_iter, iters, strict=False))  # the logger shows the bounds
+
+        logger.log_stats("overall", {"runtime": timer.last})

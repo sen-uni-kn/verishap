@@ -11,7 +11,9 @@ import numpy as np
 from formalax import Box, alpha_crown, crown, crown_ibp, ibp
 from jaxtyping import Array, Bool, Int, Real
 
+from .logger import ConsoleLogger, Logger
 from .priority_branch_store import PriorityBranchStore
+from .timer import Timer
 
 
 @jax.tree_util.register_dataclass
@@ -64,7 +66,7 @@ def multi_shap_bab(
     ] = "smart-branching-ibp-worse",
     batch_size: int = 1024,
     jit: bool = True,
-    log: bool = True,
+    log: Logger | bool = True,
 ):
     """Compute and refine bounds on Shapley values.
     This function performs branch and bound on coalitions of input features.
@@ -93,7 +95,10 @@ def multi_shap_bab(
             split_strategy: The strategy to use for splitting branches.
             batch_size: The batch size to use for the branch and bound.
             jit: Whether to just-in-time compile the branch evaluation.
-            log: Whether to print status messages.
+            log: Logger to log status messages.
+                If ``True``, a ``ConsoleLogger`` is used.
+                If ``False``, no logging is done.
+                If a ``Logger`` is provided, it is used to log the status messages.
 
         Yields:
             Bound on the Shapley value of the feature.
@@ -119,13 +124,28 @@ def multi_shap_bab(
             case "alpha-crown":
                 compute_bounds = alpha_crown
 
+    if log is True:
+        log = ConsoleLogger()
+
     if features is None:
         features = jnp.indices(base_mask.shape).reshape(base_mask.ndim, -1).T
         features = [tuple(f) for f in features.tolist()]
     elif isinstance(features, int):
         features = [features]
-    data_axes = tuple(range(1, base_mask.ndim + 1))
 
+    log.log_config(
+        "multi_shap_bab",
+        features=features,
+        compute_bounds=compute_bounds.__name__,
+        fast_compute_bounds=fast_compute_bounds.__name__,
+        select_strategy=select_strategy,
+        split_strategy=split_strategy,
+        batch_size=batch_size,
+        jit=jit,
+    )
+    timer = Timer()
+
+    data_axes = tuple(range(1, base_mask.ndim + 1))
     bound_value = compute_bounds(value_fn)
     fast_bound_value = fast_compute_bounds(value_fn)
     value_smears = smears(value_fn)
@@ -377,40 +397,48 @@ def multi_shap_bab(
         if len(branches) == 0 or jnp.allclose(shap_lbs, shap_ubs):
             break
 
-        batch, num_selected = branches.extract_max(return_size=True)
-        (
-            new_branches,
-            ((old_shap_lbs, old_shap_ubs), (new_shap_lbs, new_shap_ubs)),
-            (prune, single_coalition, tight_bounds),
-        ) = bab_step(batch, num_selected)
-        # the shap_lbs and shap_ubs still have branch axes
-        shap_lbs = shap_lbs - old_shap_lbs.sum(axis=0) + new_shap_lbs.sum(axis=0)
-        shap_ubs = shap_ubs - old_shap_ubs.sum(axis=0) + new_shap_ubs.sum(axis=0)
+        with timer["extract_max"]:
+            batch, num_selected = branches.extract_max(return_size=True)
+        with timer["bab_step"]:
+            (
+                new_branches,
+                ((old_shap_lbs, old_shap_ubs), (new_shap_lbs, new_shap_ubs)),
+                (prune, single_coalition, tight_bounds),
+            ) = bab_step(batch, num_selected)
+        with timer["update_shap_bounds"]:
+            # the shap_lbs and shap_ubs still have branch axes
+            shap_lbs = shap_lbs - old_shap_lbs.sum(axis=0) + new_shap_lbs.sum(axis=0)
+            shap_ubs = shap_ubs - old_shap_ubs.sum(axis=0) + new_shap_ubs.sum(axis=0)
         yield Box(shap_lbs.squeeze(), shap_ubs.squeeze())
 
-        # shapley bounds from the pruned branches remain part of the global bounds
-        pruned = jax.tree.map(partial(drop_pruned, prune), new_branches)
-        branches.insert(selection_priority(pruned), pruned)
+        with timer["drop_pruned"]:
+            # shapley bounds from the pruned branches remain part of the global bounds
+            pruned = jax.tree.map(partial(drop_pruned, prune), new_branches)
 
-        total_tight_bounds += tight_bounds.sum().item()
-        total_fully_split += single_coalition.sum().item()
+        with timer["insert_branches"]:
+            branches.insert(selection_priority(pruned), pruned)
 
-        if log:
+        num_fully_split = single_coalition.sum().item()
+        num_tight = (tight_bounds & ~single_coalition).sum().item()
+        total_fully_split += num_fully_split
+        total_tight_bounds += num_tight
+
+        if log is not False:
             num_branches = len(branches)
-            num_fully_split = single_coalition.sum()
-            num_tight = (tight_bounds & ~single_coalition).sum()
-            lbs, ubs = shap_lbs, shap_ubs
-            mid, ran = (lbs + ubs) / 2, (ubs - lbs) / 2
-            mid, ran = mid.tolist(), ran.tolist()
-            print(
-                f"[i: {i:3d}] Branches: {num_branches}, Pruned: {num_tight} tight, {num_fully_split} fully split"
+            log.log_iter_stats(
+                "multi_shap_bab",
+                i,
+                num_branches=num_branches,
+                num_fully_split=num_fully_split,
+                num_tight=num_tight,
             )
-            mids = ", ".join(f"{m:8.4f}" for m in mid)
-            rans = ", ".join(f"{r:8.4f}" for r in ran)
-            print(f"    φ ∈ [{mids}]")
-            print(f"      ± [{rans}]")
+            log.log_bounds("multi_shap_bab", i, (shap_lbs, shap_ubs), name="φ")
 
     total_branches = total_tight_bounds + total_fully_split
-    print(
-        f"Total number of branches: {total_branches}, of which pruned since tight: {total_tight_bounds} and fully split: {total_fully_split}"
+    log.log_stats(
+        "multi_shap_bab",
+        {"runtimes": timer.runtimes},
+        total_branches=total_branches,
+        total_tight_bounds=total_tight_bounds,
+        total_fully_split=total_fully_split,
     )

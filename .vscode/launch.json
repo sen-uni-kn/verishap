@@ -30,7 +30,7 @@
             "type": "debugpy",
             "request": "launch",
             "module": "experiments.tabular.bound",
-            "args": ["--model", "experiments/tabular/resources/iris-mlp-32x2.eqx", "--shap-variant", "marginal"],
+            "args": ["--model", "experiments/tabular/resources/iris-mlp-32x2.eqx", "--shap-variant", "zero-baseline"],
             "justMyCode": false,
         },
         {

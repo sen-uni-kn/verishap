@@ -20,6 +20,7 @@ from shap_bounds import (
     superfeature_baseline_value,
     superfeature_marginal_value,
 )
+from shap_bounds.logger import Logger
 
 from . import shaplib
 from .leverageshap import leverage_shap
@@ -32,12 +33,15 @@ class CmdArgs(ABC):
         self.parser = argparse.ArgumentParser(*parser_args, **parser_kwargs)
         self.args = None
 
-    def model_args(self, resource_dir: Path) -> "CmdArgs":
+    def model_args(self, default_model: Path | None = None) -> "CmdArgs":
+        default = (
+            {"required": True} if default_model is None else {"default": default_model}
+        )
         self.parser.add_argument(
             "--model",
             type=Path,
-            required=True,
             help="The path of the model file to load.",
+            **default,
         )
         return self
 
@@ -134,9 +138,17 @@ class CmdArgs(ABC):
         )
         return self
 
-    def out_file_args(self) -> "CmdArgs":
+    def logger_args(self) -> "CmdArgs":
         self.parser.add_argument(
-            "--out-file",
+            "--silent",
+            action="store_true",
+            help="Do not print any output to the console.",
+        )
+        return self
+
+    def out_args(self) -> "CmdArgs":
+        self.parser.add_argument(
+            "--out",
             type=str,
             default=None,
             help="Where to save the experiment results.",
@@ -215,8 +227,7 @@ class CmdArgs(ABC):
             case _:
                 raise ValueError(f"Unknown SHAP variant: {self.shap_variant}")
 
-    @property
-    def bound_method(self) -> Callable:
+    def bound_method(self, logger: Logger) -> Callable:
         match self.args.bound_method.lower():
             case "bab":
                 res = partial(
@@ -224,6 +235,7 @@ class CmdArgs(ABC):
                     self.value_function,
                     self.base_mask,
                     self.feature,
+                    log=logger,
                     **self.bound_kwargs,
                 )
                 return res
@@ -331,16 +343,38 @@ class CmdArgs(ABC):
         else:
             raise ValueError("No method name found.")
 
+    def _unique_name(self) -> str:
+        name = []
+        if hasattr(self.args, "model"):
+            name.append(self.args.model.stem)
+        if hasattr(self.args, "feature"):
+            if self.args.feature is None:
+                name.append("all-features")
+            else:
+                name.append(f"{self.args.feature}")
+        if hasattr(self.args, "output_feature"):
+            name.append(f"{self.args.output_feature}")
+        name.append(self.method_name)
+        if hasattr(self.args, "shap_variant"):
+            name.append(self.args.shap_variant)
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
+        name.append(timestamp)
+        return "_".join(name)
+
     def out_file(self, local_output_dir: Path) -> Path:
-        if self.args.out_file is None:
-            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
-            out_file = local_output_dir / (
-                f"{self.args.model.stem}_{self.args.feature}_{self.args.output_feature}_shap"
-                f"_{self.method_name}_{self.args.shap_variant}_{timestamp}.csv"
-            )
+        if self.args.out is None:
+            out_file = local_output_dir / (self._unique_name() + ".csv")
         else:
-            out_file = Path(self.args.out_file)
+            out_file = Path(self.args.out)
         out_file.parent.mkdir(parents=True, exist_ok=True)
+        return out_file
+
+    def out_dir(self, local_output_dir: Path) -> Path:
+        if self.args.out is None:
+            out_file = local_output_dir / self._unique_name()
+        else:
+            out_file = Path(self.args.out)
+        out_file.mkdir(parents=True, exist_ok=False)
         return out_file
 
     def __getattr__(self, name: str) -> Any:
