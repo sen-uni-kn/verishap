@@ -21,8 +21,8 @@ from shap_bounds import (
     superfeature_marginal_value,
 )
 
-from .leverageshap import leverage_shap
 from . import shaplib
+from .leverageshap import leverage_shap
 
 
 class CmdArgs(ABC):

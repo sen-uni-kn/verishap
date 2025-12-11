@@ -96,11 +96,11 @@ if __name__ == "__main__":
 
     out_name = args.out_name
     if out_name is None:
-        out_name = f"superpixles_{num_imgs}"
+        out_name = f"cifar10_superpixels_{num_imgs}"
     output_dir = Path(__file__).parent / "resources" / out_name
     output_dir.mkdir(parents=True, exist_ok=False)
 
-    images, masks = zip(*results.values(), strict=True)
-    np.savez_compressed(output_dir / "images.npz", *images)
-    np.savez_compressed(output_dir / "masks.npz", *masks)
-
+    images = {f"{i}": img for i, (img, _) in results.items()}
+    masks = {f"{i}": mask for i, (_, mask) in results.items()}
+    np.savez_compressed(output_dir / "images.npz", **images)
+    np.savez_compressed(output_dir / "masks.npz", **masks)
