@@ -5,8 +5,8 @@ from pathlib import Path
 from shap_bounds.logger import ConsoleLogger, FileLogger, JoinLoggers
 from shap_bounds.timer import Timer
 
-from .argument_parser import CIFAR10CmdArgs
 from ..runstats import machine_and_code_details
+from .argument_parser import CIFAR10CmdArgs
 
 local_resoure_dir = Path(__file__).parent / "resources"
 local_output_dir = Path(__file__).parent / "output"

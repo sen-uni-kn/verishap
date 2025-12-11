@@ -133,16 +133,17 @@ def multi_shap_bab(
     elif isinstance(features, int):
         features = [features]
 
-    log.log_config(
-        "multi_shap_bab",
-        features=features,
-        compute_bounds=compute_bounds.__name__,
-        fast_compute_bounds=fast_compute_bounds.__name__,
-        select_strategy=select_strategy,
-        split_strategy=split_strategy,
-        batch_size=batch_size,
-        jit=jit,
-    )
+    if log is not False:
+        log.log_config(
+            "multi_shap_bab",
+            features=features,
+            compute_bounds=compute_bounds.__name__,
+            fast_compute_bounds=fast_compute_bounds.__name__,
+            select_strategy=select_strategy,
+            split_strategy=split_strategy,
+            batch_size=batch_size,
+            jit=jit,
+        )
     timer = Timer()
 
     data_axes = tuple(range(1, base_mask.ndim + 1))
@@ -437,7 +438,7 @@ def multi_shap_bab(
     total_branches = total_tight_bounds + total_fully_split
     log.log_stats(
         "multi_shap_bab",
-        {"runtimes": timer.runtimes},
+        {"runtimes": timer.runtimes, "iterations": i + 1},
         total_branches=total_branches,
         total_tight_bounds=total_tight_bounds,
         total_fully_split=total_fully_split,
