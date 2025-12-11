@@ -16,9 +16,9 @@ class MLP(eqx.Module):
 
     def __init__(
         self,
-        input_dim,
-        output_dim,
         key,
+        input_dim=3*32*32,
+        output_dim=1,
         hidden_dim=512,
         hidden_layers=3,
     ):
@@ -41,4 +41,4 @@ class MLP(eqx.Module):
         x = jnp.ravel(x)
         for layer in self.layers:
             x = layer(x)
-        return x
+        return x.squeeze(-1)
