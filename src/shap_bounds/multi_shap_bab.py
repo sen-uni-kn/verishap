@@ -8,8 +8,8 @@ from typing import Callable, Literal
 import jax
 import jax.numpy as jnp
 import numpy as np
-from formalax import Box, crown_ibp, ibp
-from jaxtyping import Array, Int, Real
+from formalax import Box, alpha_crown, crown, crown_ibp, ibp
+from jaxtyping import Array, Bool, Int, Real
 
 from .priority_branch_store import PriorityBranchStore
 
@@ -27,6 +27,7 @@ class BranchData:
     # The sum of coalition weights is the same indepedently of
     # the feature we are computing the Shapley value for.
     total_coalition_weight: Real[Array, " b"]
+    branch_index: Int[Array, " b"]  # count from zero
 
 
 def smears(
@@ -48,7 +49,8 @@ def multi_shap_bab(
     value_fn: Callable[[Real[Array, " b *shape"]], Real[Array, " b"]],
     base_mask: Real[Array, " *shape"],
     features: Sequence[tuple[int, ...]] | None = None,
-    compute_bounds=crown_ibp,
+    compute_bounds: Callable
+    | Literal["crown_ibp", "ibp", "crown", "alpha-crown"] = crown_ibp,
     fast_compute_bounds=ibp,
     select_strategy: Literal["max-diam", "min-diam", "fifo", "lifo"] = "max-diam",
     split_strategy: Literal[
@@ -106,6 +108,17 @@ def multi_shap_bab(
     # - val: value
     # - diff: difference
     # --------------------------------------------------------------------------
+    if isinstance(compute_bounds, str):
+        match compute_bounds:
+            case "crown_ibp":
+                compute_bounds = crown_ibp
+            case "ibp":
+                compute_bounds = ibp
+            case "crown":
+                compute_bounds = crown
+            case "alpha-crown":
+                compute_bounds = alpha_crown
+
     if features is None:
         features = jnp.indices(base_mask.shape).reshape(base_mask.ndim, -1).T
         features = [tuple(f) for f in features.tolist()]
@@ -116,6 +129,19 @@ def multi_shap_bab(
     bound_value = compute_bounds(value_fn)
     fast_bound_value = fast_compute_bounds(value_fn)
     value_smears = smears(value_fn)
+
+    def selection_priority(branches: BranchData):
+        """Computes the priority of branches that determine the order of selection."""
+        match select_strategy:
+            case "fifo" | "lifo":
+                scores = branches.branch_index
+                return scores if select_strategy == "lifo" else -scores
+            case "max-diam" | "min-diam":
+                total_coaliw = branches.total_coalition_weight
+                diameters = (branches.value_ub - branches.value_lb) * total_coaliw
+                return diameters if select_strategy == "max-diam" else -diameters
+            case _:
+                raise ValueError(f"Invalid select strategy: {select_strategy}")
 
     def split(
         branches: BranchData, split_axes: Int[Array, " b"]
@@ -206,22 +232,9 @@ def multi_shap_bab(
 
         return split_axes
 
-    def bab_step(batch: BranchData, num_branches: int):
-        split_axes = select_split(batch)
-        new_coalitions, new_total_coaliw = split(batch, split_axes)
-        new_value_lbs, new_value_ubs = bound_value(new_coalitions).concrete
-        new_num_splits = jnp.concat(
-            [batch.num_splits + 1, batch.num_splits + 1], axis=0
-        )
-        return BranchData(
-            new_coalitions,
-            new_value_lbs,
-            new_value_ubs,
-            new_num_splits,
-            new_total_coaliw,
-        )
-
-    def to_prune(branches: BranchData, num_branches: int):
+    def to_prune(
+        branches: BranchData,
+    ) -> tuple[Bool[Array, " b"], Bool[Array, " b"], Bool[Array, " b"]]:
         """These steps can be awefully slow for some reason if not jitted."""
         # Prune completely split branches
         coali_lb, coali_ub = branches.coalitions
@@ -230,69 +243,6 @@ def multi_shap_bab(
         tight_bounds = jnp.isclose(branches.value_ub, branches.value_lb)
         prune = single_coalition | tight_bounds
         return prune, single_coalition, tight_bounds
-
-    if jit:
-        bab_step_jit = jax.jit(bab_step, static_argnums=(1,))
-        to_prune_jit = jax.jit(to_prune, static_argnums=(1,))
-
-        def pad(x, padding: int):
-            pad_val = jnp.empty((padding, *x.shape[1:]), dtype=x.dtype)
-            return jnp.concat([x, pad_val], axis=0)
-
-        def bab_step(batch: BranchData, num_branches: int):
-            padding = batch_size - num_branches
-
-            def unpad(x_padded):
-                # the values that we unpad have twice the batch size
-                # since they contain first the left branch and
-                # then the right branches
-                left = x_padded[:num_branches]
-                right = x_padded[batch_size : batch_size + num_branches]
-                return jnp.concat([left, right], axis=0)
-
-            padded = jax.tree.map(partial(pad, padding=padding), batch)
-            out_padded = bab_step_jit(padded, num_branches=batch_size)
-            out = jax.tree.map(unpad, out_padded)
-            return out
-
-        def to_prune(branches: BranchData, num_branches: int):
-            padding = 2 * batch_size - num_branches
-
-            def unpad(x_padded):
-                return x_padded[:num_branches]
-
-            padded = jax.tree.map(partial(pad, padding=padding), branches)
-            res = to_prune_jit(padded, num_branches=batch_size)
-            return jax.tree.map(unpad, res)
-
-    branch_counter = it.count()
-
-    def selection_priority(branches: BranchData):
-        """Computes the priority of branches that determine the order of selection."""
-        match select_strategy:
-            case "fifo" | "lifo":
-                scores = jnp.array([next(branch_counter) for _ in range(len(branches))])
-                return scores if select_strategy == "lifo" else -scores
-            case "max-diam" | "min-diam":
-                total_coaliw = branches.total_coalition_weight
-                diameters = (branches.value_ub - branches.value_lb) * total_coaliw
-                return diameters if select_strategy == "max-diam" else -diameters
-            case _:
-                raise ValueError(f"Invalid select strategy: {select_strategy}")
-
-    # Root branch
-    all_coalitions = Box(
-        jnp.zeros((1,) + base_mask.shape, dtype=base_mask.dtype),
-        jnp.ones((1,) + base_mask.shape, dtype=base_mask.dtype),
-    )
-    zero_depth = jnp.zeros((1,), dtype=int)
-    total_coaliw = jnp.ones((1,), dtype=base_mask.dtype)
-    value_lb, value_ub = bound_value(all_coalitions).concrete
-    root_data = BranchData(all_coalitions, value_lb, value_ub, zero_depth, total_coaliw)
-
-    branches: PriorityBranchStore[BranchData] = PriorityBranchStore(
-        selection_priority(root_data), root_data, batch_size
-    )
 
     # Compute SHAP bounds from value bounds
     zeros = jnp.zeros_like(base_mask, dtype=float)
@@ -336,40 +286,114 @@ def multi_shap_bab(
             + sum_coaliw * val_lb * both
             - sum_coaliw * val_ub * both
             - sum_coaliw_without_i * val_ub * without_i
-        ).sum(axis=-1)
+        )  # .sum(axis=-1)  # sum outside jitted code to handle padding correctly
         contrib_ub = (
             sum_coaliw_with_i * val_ub * with_i
             + sum_coaliw * val_ub * both
             - sum_coaliw * val_lb * both
             - sum_coaliw_without_i * val_lb * without_i
-        ).sum(axis=-1)
+        )  # .sum(axis=-1)
+        contrib_lb: Real[Array, " b f"] = jnp.moveaxis(contrib_lb, -1, 0)
+        contrib_ub = jnp.moveaxis(contrib_ub, -1, 0)
         return Box(contrib_lb, contrib_ub)
 
-    shap_lbs, shap_ubs = shap_bounds(root_data)
+    def bab_step(
+        batch: BranchData, num_branches: int
+    ) -> tuple[
+        BranchData,
+        Real[Array, ""],
+        Real[Array, ""],
+        tuple[Bool[Array, " b"], Bool[Array, " b"], Bool[Array, " b"]],
+    ]:
+        old_shap_bounds = shap_bounds(batch)
+
+        split_axes = select_split(batch)
+        new_coalitions, new_total_coaliw = split(batch, split_axes)
+        new_value_lbs, new_value_ubs = bound_value(new_coalitions).concrete
+        new_num_splits = jnp.concat(
+            [batch.num_splits + 1, batch.num_splits + 1], axis=0
+        )
+        # Count branches as in a binary heap
+        new_branch_index = jnp.concat(
+            [2 * batch.branch_index + 1, 2 * batch.branch_index + 2], axis=0
+        )
+        new_branches = BranchData(
+            new_coalitions,
+            new_value_lbs,
+            new_value_ubs,
+            new_num_splits,
+            new_total_coaliw,
+            new_branch_index,
+        )
+
+        new_shap_bounds = shap_bounds(new_branches)
+        return new_branches, (old_shap_bounds, new_shap_bounds), to_prune(new_branches)
+
+    def drop_pruned(
+        prune: Bool[Array, " b"], array: Real[Array, " b *shape"]
+    ) -> Real[Array, " c *shape"]:
+        return array[~prune]
+
+    if jit:
+        bab_step_jit = jax.jit(bab_step, static_argnums=(1,))
+
+        def pad(x, padding: int):
+            pad_val = jnp.empty((padding, *x.shape[1:]), dtype=x.dtype)
+            return jnp.concat([x, pad_val], axis=0)
+
+        def unpad(x_padded, num_branches: int):
+            # the values that we unpad have twice the batch size
+            # since they contain first the left branch and
+            # then the right branches
+            left = x_padded[:num_branches]
+            right = x_padded[batch_size : batch_size + num_branches]
+            return jnp.concat([left, right], axis=0)
+
+        def bab_step(batch: BranchData, num_branches: int):
+            padding = batch_size - num_branches
+            padded = jax.tree.map(partial(pad, padding=padding), batch)
+            out_padded = bab_step_jit(padded, num_branches=batch_size)
+            out = jax.tree.map(partial(unpad, num_branches=num_branches), out_padded)
+            return out
+
+    # Root branch
+    all_coalitions = Box(
+        jnp.zeros((1,) + base_mask.shape, dtype=base_mask.dtype),
+        jnp.ones((1,) + base_mask.shape, dtype=base_mask.dtype),
+    )
+    zero = jnp.zeros((1,), dtype=int)
+    total_coaliw = jnp.ones((1,), dtype=base_mask.dtype)
+    value_lb, value_ub = bound_value(all_coalitions).concrete
+    root_data = BranchData(all_coalitions, value_lb, value_ub, zero, total_coaliw, zero)
+
+    branches: PriorityBranchStore[BranchData] = PriorityBranchStore(
+        selection_priority(root_data), root_data, batch_size
+    )
+
+    shap_lbs, shap_ubs = jax.tree.map(lambda x: x.squeeze(), shap_bounds(root_data))
+    total_tight_bounds = total_fully_split = 0
     yield Box(shap_lbs.squeeze(), shap_ubs.squeeze())
     for i in it.count():
         if len(branches) == 0 or jnp.allclose(shap_lbs, shap_ubs):
-            return None
+            break
 
         batch, num_selected = branches.extract_max(return_size=True)
-
-        # Subtract here, since we will refine the bounds for batch
-        batch_shap_lbs, batch_shap_ubs = shap_bounds(batch)
-        shap_lbs = shap_lbs - batch_shap_lbs
-        shap_ubs = shap_ubs - batch_shap_ubs
-
-        new_branches = bab_step(batch, num_selected)
-
-        new_shap_lbs, new_shap_ubs = shap_bounds(new_branches)
-        shap_lbs = shap_lbs + new_shap_lbs
-        shap_ubs = shap_ubs + new_shap_ubs
+        (
+            new_branches,
+            ((old_shap_lbs, old_shap_ubs), (new_shap_lbs, new_shap_ubs)),
+            (prune, single_coalition, tight_bounds),
+        ) = bab_step(batch, num_selected)
+        # the shap_lbs and shap_ubs still have branch axes
+        shap_lbs = shap_lbs - old_shap_lbs.sum(axis=0) + new_shap_lbs.sum(axis=0)
+        shap_ubs = shap_ubs - old_shap_ubs.sum(axis=0) + new_shap_ubs.sum(axis=0)
         yield Box(shap_lbs.squeeze(), shap_ubs.squeeze())
 
         # shapley bounds from the pruned branches remain part of the global bounds
-        num_branches = new_branches.value_lb.shape[0]
-        prune, single_coalition, tight_bounds = to_prune(new_branches, num_branches)
-        pruned = jax.tree.map(lambda a: a[~prune], new_branches)  # noqa: B023
+        pruned = jax.tree.map(partial(drop_pruned, prune), new_branches)
         branches.insert(selection_priority(pruned), pruned)
+
+        total_tight_bounds += tight_bounds.sum().item()
+        total_fully_split += single_coalition.sum().item()
 
         if log:
             num_branches = len(branches)
@@ -385,3 +409,8 @@ def multi_shap_bab(
             rans = ", ".join(f"{r:8.4f}" for r in ran)
             print(f"    φ ∈ [{mids}]")
             print(f"      ± [{rans}]")
+
+    total_branches = total_tight_bounds + total_fully_split
+    print(
+        f"Total number of branches: {total_branches}, of which pruned since tight: {total_tight_bounds} and fully split: {total_fully_split}"
+    )
