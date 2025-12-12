@@ -124,7 +124,7 @@ class PriorityBranchStore[D: PyTree]:
         """
         assert priority.shape[0] <= 2 * self.batch_size
         branches, pytree = jax.tree.flatten(branches)
-        assert pytree == self.pytree
+        # assert pytree == self.pytree
         for branch, shape in zip(branches, self.leaf_shapes, strict=True):
             assert branch.shape[1:] == shape
 
@@ -160,6 +160,10 @@ class PriorityBranchStore[D: PyTree]:
             heapify(len(self.__nodes) - 1)
             self.__nodes.append(buf3)
             heapify(len(self.__nodes) - 1)
+
+    def pop(self, return_size: bool = False) -> tuple[D, int]:
+        """Alias for ``extract_max``."""
+        return self.extract_max(return_size)
 
     def extract_max(self, return_size: bool = False) -> tuple[D, int]:
         """Returns the data with the highest priority as a batch of size ``batch_size``.

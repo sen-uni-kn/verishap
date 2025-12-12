@@ -18,7 +18,7 @@ if __name__ == "__main__":
         .feature_args()
         .shap_variant_args()
         .estimator_args()
-        .out_file_args()
+        .out_args()
         .parse_args()
     )
     estimator = args.estimator()

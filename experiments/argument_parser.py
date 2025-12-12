@@ -136,6 +136,12 @@ class CmdArgs(ABC):
             "For example, --num-samples 1:100:10 specifies a range and "
             "--num-samples 100,200,300 specifies a list.",
         )
+        self.parser.add_argument(
+            "--seed",
+            default=0,
+            type=int,
+            help="The random seed to use for the experiment.",
+        )
         return self
 
     def logger_args(self) -> "CmdArgs":
@@ -194,6 +200,10 @@ class CmdArgs(ABC):
         return data[perm[:num_background]]
 
     @property
+    def data_mean(self) -> np.ndarray:
+        return self.data[:].mean(axis=0)
+
+    @property
     def base_mask(self) -> np.ndarray:
         return jnp.ones_like(self.sample)
 
@@ -213,10 +223,18 @@ class CmdArgs(ABC):
             case "zero-baseline":
                 baseline = jnp.zeros_like(x)
                 return baseline_value(self.model, x, baseline, out_feature)
+            case "mean-baseline":
+                baseline = self.data_mean.reshape(x.shape)
+                return baseline_value(self.model, x, baseline, out_feature)
             case "marginal":
                 return marginal_value(self.model, x, self.background_data, out_feature)
             case "superfeature-zero-baseline":
                 baseline = jnp.zeros_like(x)
+                return superfeature_baseline_value(
+                    self.model, x, baseline, masks, out_feature
+                )
+            case "superfeature-mean-baseline":
+                baseline = self.data_mean.reshape(x.shape)
                 return superfeature_baseline_value(
                     self.model, x, baseline, masks, out_feature
                 )
@@ -305,10 +323,16 @@ class CmdArgs(ABC):
             case "zero-baseline":
                 baseline = jnp.zeros_like(self.sample)
                 estimator = partial(estimator, baseline, self.sample)
+            case "mean-baseline":
+                baseline = self.data_mean.reshape(self.sample.shape)
+                estimator = partial(estimator, baseline, self.sample)
             case "marginal":
                 estimator = partial(estimator, self.background_data, self.sample)
-            case "superfeature-zero-baseline":
-                baseline = jnp.zeros_like(self.sample)
+            case "superfeature-zero-baseline" | "superfeature-mean-baseline":
+                if shap_variant == "superfeature-zero-baseline":
+                    baseline = jnp.zeros_like(self.sample)
+                else:
+                    baseline = self.data_mean.reshape(self.sample.shape)
                 baseline = jnp.expand_dims(baseline, axis=0)
                 masker = shaplib.superfeature_masker(self.sample, baseline, masks)
                 x = jnp.ones(masks.shape[0], dtype=jnp.float32)
@@ -321,6 +345,9 @@ class CmdArgs(ABC):
             case _:
                 raise ValueError(f"Unknown SHAP variant: {self.args.shap_variant}")
 
+        seed = self.args.seed
+        np.random.seed(seed)
+        torch.manual_seed(seed+1)
         return estimator
 
     @property

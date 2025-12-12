@@ -1,5 +1,7 @@
 # Copyright 2025 David Boetius
 import numpy as np
+import pandas as pd
+from ucimlrepo import fetch_ucirepo
 
 
 def corrgroups(
@@ -135,5 +137,20 @@ def independentlinear(
 
     # restore the previous numpy random seed
     np.random.seed(old_seed)
+
+    return x, y
+
+
+def credit_card_default() -> tuple[np.ndarray, np.ndarray]:
+    """Credit Card Default Dataset from the UCI ML Repository."""
+    dataset = fetch_ucirepo(id=144)
+    categorical_features = [f"X{i}" for i in range(2, 12)]  # X2 to X11
+
+    x = dataset.data.features
+    x = pd.get_dummies(x)
+    x = x.to_numpy().astype(np.float32)
+
+    y = dataset.data.targets
+    y = (y > 1).to_numpy().astype(np.bool_)
 
     return x, y

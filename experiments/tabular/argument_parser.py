@@ -35,7 +35,7 @@ class TabularCmdArgs(CmdArgs):
         return model
 
     def out_file(self, local_output_dir: Path) -> Path:
-        if self.args.out_file is None:
+        if self.args.out is None:
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
             out_file = (
                 local_output_dir
