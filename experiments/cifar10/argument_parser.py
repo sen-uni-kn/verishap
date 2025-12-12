@@ -105,6 +105,12 @@ class CIFAR10CmdArgs(CmdArgs):
         return NumpyDataset(testset)
 
     @property
+    def data_mean(self) -> np.ndarray:
+        resource_dir = Path(__file__).parent / "resources"
+        data_mean = np.load(resource_dir / "cifar10_train_mean.npy")
+        return data_mean
+
+    @property
     def _superpixels_path(self) -> Path:
         resources_dir = Path(__file__).parent / "resources"
         return resources_dir / "cifar10_superpixels_100"

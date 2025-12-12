@@ -122,8 +122,10 @@ def multi_shap_bab(
                 compute_bounds = ibp
             case "crown":
                 compute_bounds = crown
-            case "alpha-crown":
+            case "alpha-crown" | "alpha_crown":
                 compute_bounds = alpha_crown
+            case _:
+                raise ValueError(f"Unknown compute bounds method: {compute_bounds}")
 
     if log is True:
         log = ConsoleLogger()

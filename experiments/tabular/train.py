@@ -9,7 +9,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from jaxtyping import Array, Float, Int, PyTree
+from jaxtyping import Array, Bool, Float, Int, PyTree
+from optax.losses import sigmoid_binary_cross_entropy as binary_cross_entropy
 from optax.losses import softmax_cross_entropy_with_integer_labels as cross_entropy
 from sklearn.model_selection import train_test_split
 
@@ -20,10 +21,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument(
+        "-r",
         "--regression",
         action="store_true",
         help="Whether the dataset is a regression task. "
-        "Otherwise, classification is assumed.",
+        "Otherwise, multi-class classification is assumed.",
+    )
+    parser.add_argument(
+        "-b",
+        "--binary-classification",
+        action="store_true",
+        help="Whether the dataset is a binary classification task. "
+        "Otherwise, multi-class classification is assumed.",
     )
     parser.add_argument("--hidden-dim", type=int, default=32)
     parser.add_argument("--hidden-layers", type=int, default=2)
@@ -35,7 +44,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     dataset = args.dataset
-    is_classification = not args.regression
+    is_regression = args.regression
+    is_binary_class = args.binary_classification
+    is_classification = not is_regression and not is_binary_class
     hidden_dim = args.hidden_dim
     hidden_layers = args.hidden_layers
     batch_size = args.batch_size
@@ -66,6 +77,12 @@ if __name__ == "__main__":
         )
         targets = targets.astype(np.int32)
         output_dim = len(np.unique(targets))
+    elif is_binary_class:
+        assert targets.dtype in (np.bool_,), (
+            "Unsupported target dtype for binary classification: " + str(targets.dtype)
+        )
+        output_dim = 1
+        targets = targets.reshape(-1, output_dim)
     else:
         output_dim = targets.shape[-1] if len(targets.shape) > 1 else 1
         targets = targets.reshape(-1, output_dim)
@@ -93,14 +110,21 @@ if __name__ == "__main__":
     # ==============================================================================
 
     key, subkey = jax.random.split(key, 2)
+    # model = MLP(
+    #     input_dim=input_dim,
+    #     output_dim=output_dim,
+    #     key=subkey,
+    #     hidden_dim=hidden_dim,
+    #     hidden_layers=hidden_layers,
+    #     input_norm_stats=(data_mean, data_std),
+    #     output_norm_stats=None if is_classification else (targets_mean, targets_std),
+    # )
     model = MLP(
         input_dim=input_dim,
         output_dim=output_dim,
         key=subkey,
         hidden_dim=hidden_dim,
         hidden_layers=hidden_layers,
-        input_norm_stats=(data_mean, data_std),
-        output_norm_stats=None if is_classification else (targets_mean, targets_std),
     )
 
     print("=" * 80)
@@ -126,6 +150,20 @@ if __name__ == "__main__":
         model = jax.vmap(model, axis_name="batch", in_axes=0, out_axes=0)
         pred_y = model(x)
         pred_y = jnp.argmax(pred_y, axis=1)
+        return jnp.mean(y == pred_y)
+
+    @eqx.filter_jit
+    def eval_binary_classification(
+        model: MLP,
+        x: Float[Array, "batch n"],
+        y: Bool[Array, " batch"],
+    ) -> Float[Array, ""]:
+        """This function takes as input the current model
+        and computes the root mean squared error, as well as R² on a batch.
+        """
+        model = jax.vmap(model, axis_name="batch", in_axes=0, out_axes=0)
+        pred_y = model(x)
+        pred_y = pred_y >= 0.0
         return jnp.mean(y == pred_y)
 
     # @eqx.filter_jit
@@ -154,6 +192,8 @@ if __name__ == "__main__":
         pred_y = model(x)
         if is_classification:
             return cross_entropy(pred_y, y).mean()
+        elif is_binary_class:
+            return binary_cross_entropy(pred_y, y).mean()
         else:
             return ((pred_y - y) ** 2).mean()
 
@@ -164,6 +204,9 @@ if __name__ == "__main__":
         loss_val = loss(inference_model, x, y)
         if is_classification:
             acc_val = eval_classification(inference_model, x, y)
+            return loss_val, acc_val
+        elif is_binary_class:
+            acc_val = eval_binary_classification(inference_model, x, y)
             return loss_val, acc_val
         else:
             rmse_val, r2_val = eval_regression(inference_model, x, y)
@@ -209,7 +252,7 @@ if __name__ == "__main__":
 
                 if (i % print_every) == 0 or (i == epoch_len - 1):
                     progress = (i + 1) / epoch_len
-                    if is_classification:
+                    if is_classification or is_binary_class:
                         train_loss, train_accuracy = evaluate(model, trainset)
                         test_loss, test_accuracy = evaluate(model, testset)
                         print(
@@ -245,7 +288,7 @@ if __name__ == "__main__":
         "epochs": epochs,
         "seed": seed,
     }
-    if is_classification:
+    if is_classification or is_binary_class:
         train_loss, train_accuracy = evaluate(model, trainset)
         test_loss, test_accuracy = evaluate(model, testset)
         info_dict["train_loss"] = train_loss.item()
