@@ -39,6 +39,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--balance-classes", action="store_true")
     parser.add_argument("--seed", type=int, default=2810)
     parser.add_argument("--print-every", type=int, default=100)
     args = parser.parse_args()
@@ -67,7 +68,16 @@ if __name__ == "__main__":
     print(f"Obtaining {dataset} dataset...")
     data, targets = load_dataset(dataset)
 
+    if is_classification:
+        if targets.dtype == np.bool_:
+            is_binary_class = True
+            is_classification = False
+        elif targets.dtype in (np.float32, np.float64):
+            is_regression = True
+            is_classification = False
+
     data_mean, data_std = data.mean(axis=0), data.std(axis=0)
+    data_std = np.where(data_std == 0.0, 1.0, data_std)
     targets_mean, targets_std = targets.mean(axis=0), targets.std(axis=0)
 
     input_dim = data.shape[-1]
@@ -91,6 +101,32 @@ if __name__ == "__main__":
         data, targets, test_size=0.2, random_state=seed + 2
     )
 
+    if args.balance_classes:
+        if not is_binary_class:
+            raise ValueError(
+                "Balance classes is only supported for binary classification."
+            )
+        class1, class2 = (train_targets == 0).squeeze(), (train_targets == 1).squeeze()
+        num_class1 = class1.sum()
+        num_class2 = class2.sum()
+        oversample1 = max(num_class2 / num_class1, 1)
+        oversample2 = max(num_class1 / num_class2, 1)
+        data1 = train_data[class1]
+        data2 = train_data[class2]
+        data1 = np.repeat(data1, oversample1, axis=0)
+        data2 = np.repeat(data2, oversample2, axis=0)
+        targets1 = np.repeat(train_targets[class1], oversample1, axis=0)
+        targets2 = np.repeat(train_targets[class2], oversample2, axis=0)
+        train_data = np.concatenate([data1, data2])
+        train_targets = np.concatenate([targets1, targets2])
+        rand_perm = np.random.permutation(np.arange(len(train_data)))
+        train_data = train_data[rand_perm]
+        train_targets = train_targets[rand_perm]
+
+        num_class1 = (train_targets == 0).sum()
+        num_class2 = (train_targets == 1).sum()
+        print(f"Class balance after rebalancing: {num_class1/num_class2:.2f}%")
+
     @dataclass
     class Dataset:
         data: np.ndarray
@@ -110,21 +146,14 @@ if __name__ == "__main__":
     # ==============================================================================
 
     key, subkey = jax.random.split(key, 2)
-    # model = MLP(
-    #     input_dim=input_dim,
-    #     output_dim=output_dim,
-    #     key=subkey,
-    #     hidden_dim=hidden_dim,
-    #     hidden_layers=hidden_layers,
-    #     input_norm_stats=(data_mean, data_std),
-    #     output_norm_stats=None if is_classification else (targets_mean, targets_std),
-    # )
     model = MLP(
         input_dim=input_dim,
         output_dim=output_dim,
         key=subkey,
         hidden_dim=hidden_dim,
         hidden_layers=hidden_layers,
+        input_norm_stats=(data_mean, data_std),
+        output_norm_stats=(targets_mean, targets_std) if is_regression else None,
     )
 
     print("=" * 80)
