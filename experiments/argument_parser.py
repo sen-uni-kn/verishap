@@ -401,7 +401,7 @@ class CmdArgs(ABC):
             out_file = local_output_dir / self._unique_name()
         else:
             out_file = Path(self.args.out)
-        out_file.mkdir(parents=True, exist_ok=False)
+        out_file.mkdir(parents=True, exist_ok=True)
         return out_file
 
     def __getattr__(self, name: str) -> Any:
