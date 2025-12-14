@@ -50,10 +50,11 @@ RUN_EXACTSHAP=true  # stop running ExactSHAP after it times out once
 
 for network in "${NETWORKS[@]}"; do
   network_filename=$(basename "$network")
+  network_name="${network_filename%.*}"
   if [ "$RUN_EXACTSHAP" = true ]; then
     printf "\n\nRunning Warmup for ExactSHAP on ${network}...\n"
 
-    OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/warmup/ExactSHAP/${network_filename}"
+    OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/warmup/ExactSHAP/${network_name}"
     mkdir -p "$OUT_DIR"
     timeout "$TIMEOUT" \
       python -m experiments.tabular.exact_shap \
@@ -64,7 +65,7 @@ for network in "${NETWORKS[@]}"; do
 
     printf "\n\nRunning ExactSHAP on ${network}...\n"
 
-    OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/ExactSHAP/${network_filename}"
+    OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/ExactSHAP/${network_name}"
     mkdir -p "$OUT_DIR"
     timeout "$EXACTSHAP_WARMUP_TIMEOUT" \
       python -m experiments.tabular.exact_shap \
@@ -82,7 +83,7 @@ for network in "${NETWORKS[@]}"; do
 
   printf "\n\nRunning Warmup for Branch and Bound on ${network}...\n"
 
-  OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/warmup/BaB/${network_filename}"
+  OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/warmup/BaB/${network_name}"
   mkdir -p "$OUT_DIR"
   timeout "$BAB_WARMUP_TIMEOUT" \
     python -m experiments.tabular.bound \
@@ -97,7 +98,7 @@ for network in "${NETWORKS[@]}"; do
 
   printf "\n\nRunning Branch and Bound on ${network}...\n"
 
-  OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/warmup/BaB/${network_filename}"
+  OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/warmup/BaB/${network_name}"
   mkdir -p "$OUT_DIR"
   timeout "$HARD_TIMEOUT" \
     python -m experiments.tabular.bound \
