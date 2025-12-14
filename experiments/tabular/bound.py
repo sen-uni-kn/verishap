@@ -38,7 +38,7 @@ if __name__ == "__main__":
     with FileLogger(args.out_dir(local_output_dir)) as file_logger:
         logger = JoinLoggers(*loggers, file_logger)
         logger.log_config("run_details", machine_and_code_details())
-        logger.log_config("cmd_args", args.args.vars())
+        logger.log_config("cmd_args", args.all_arguments)
 
         with timer["overall"] as timer_context:
             bounds_iter = args.bound_method(logger)()

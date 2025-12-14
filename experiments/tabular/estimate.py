@@ -1,7 +1,6 @@
 # Copyright 2025 David Boetius
 from pathlib import Path
 
-import pandas as pd
 from tqdm import tqdm
 
 from shap_bounds.logger import ConsoleLogger, FileLogger, JoinLoggers
@@ -22,6 +21,7 @@ if __name__ == "__main__":
         .feature_args()
         .shap_variant_args()
         .estimator_args()
+        .logger_args()
         .out_args()
         .parse_args()
     )
@@ -35,7 +35,7 @@ if __name__ == "__main__":
     with FileLogger(args.out_dir(local_output_dir)) as file_logger:
         logger = JoinLoggers(*loggers, file_logger)
         logger.log_config("run_details", machine_and_code_details())
-        logger.log_config("cmd_args", args.args.vars())
+        logger.log_config("cmd_args", args.all_arguments)
 
         for n in tqdm(num_samples, disable=args.silent):
             with timer["estimate"] as timer_context:

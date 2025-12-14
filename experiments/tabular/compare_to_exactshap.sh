@@ -46,13 +46,14 @@ then
   TIMESTAMP="$(date -u +%Y-%m-%d_%H-%M-%S)"
 fi
 
-RUN_EXACTSHAP=true
+RUN_EXACTSHAP=true  # stop running ExactSHAP after it times out once
 
 for network in "${NETWORKS[@]}"; do
+  network_filename=$(basename "$network")
   if [ "$RUN_EXACTSHAP" = true ]; then
-    printf "Running Warmup for ExactSHAP on ${network}...\n"
+    printf "\n\nRunning Warmup for ExactSHAP on ${network}...\n"
 
-    OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/warmup/ExactSHAP/${network}"
+    OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/warmup/ExactSHAP/${network_filename}"
     mkdir -p "$OUT_DIR"
     timeout "$TIMEOUT" \
       python -m experiments.tabular.exact_shap \
@@ -61,9 +62,9 @@ for network in "${NETWORKS[@]}"; do
         --shap-variant "zero-baseline" \
         --out "$OUT_DIR" \
 
-    printf "Running ExactSHAP on ${network}...\n"
+    printf "\n\nRunning ExactSHAP on ${network}...\n"
 
-    OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/ExactSHAP/${network}"
+    OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/ExactSHAP/${network_filename}"
     mkdir -p "$OUT_DIR"
     timeout "$EXACTSHAP_WARMUP_TIMEOUT" \
       python -m experiments.tabular.exact_shap \
@@ -79,9 +80,9 @@ for network in "${NETWORKS[@]}"; do
     fi
   fi
 
-  printf "Running Warmup for Branch and Bound on ${network}...\n"
+  printf "\n\nRunning Warmup for Branch and Bound on ${network}...\n"
 
-  OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/warmup/Ours/${network}"
+  OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/warmup/BaB/${network_filename}"
   mkdir -p "$OUT_DIR"
   timeout "$BAB_WARMUP_TIMEOUT" \
     python -m experiments.tabular.bound \
@@ -91,12 +92,12 @@ for network in "${NETWORKS[@]}"; do
       --bound-method "bab" \
       --bound-options "batch_size=$BATCH_SIZE" \
       --out "$OUT_DIR" \
-      --max-iters 10 \
+      --max-iters 2 \
       --timeout "$BAB_WARMUP_TIMEOUT"
 
-  printf "Running Branch and Bound on ${network}...\n"
+  printf "\n\nRunning Branch and Bound on ${network}...\n"
 
-  OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/warmup/Ours/${network}"
+  OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/warmup/BaB/${network_filename}"
   mkdir -p "$OUT_DIR"
   timeout "$HARD_TIMEOUT" \
     python -m experiments.tabular.bound \

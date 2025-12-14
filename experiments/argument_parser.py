@@ -177,6 +177,10 @@ class CmdArgs(ABC):
     # =========================================================================
 
     @property
+    def all_arguments(self) -> dict:
+        return {key: str(value) for key, value in vars(self.args).items()}
+
+    @property
     @abstractmethod
     def model(self) -> Callable:
         """Obtain the model as a callable."""
