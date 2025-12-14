@@ -144,6 +144,15 @@ class CmdArgs(ABC):
         )
         return self
 
+    def timeout_args(self) -> "CmdArgs":
+        self.parser.add_argument(
+            "--timeout",
+            type=float,
+            default=None,
+            help="The timeout in seconds for the experiment.",
+        )
+        return self
+
     def logger_args(self) -> "CmdArgs":
         self.parser.add_argument(
             "--silent",

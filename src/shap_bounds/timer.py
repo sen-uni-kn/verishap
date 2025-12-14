@@ -7,15 +7,17 @@ class TimeContextManager:
     def __init__(self, timer: "Timer", key: str):
         self.timer = timer
         self.key = key
+        self.start = None
+        self.runtime = None
 
     def __enter__(self):
         self.start = perf_counter()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        runtime = perf_counter() - self.start
-        self.timer._runtimes[self.key].append(runtime)
-        self.timer.last = runtime
+        self.runtime = perf_counter() - self.start
+        self.timer._runtimes[self.key].append(self.runtime)
+        self.timer.last = self.runtime
 
 
 class Timer:

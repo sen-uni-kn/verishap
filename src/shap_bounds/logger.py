@@ -15,7 +15,7 @@ representer.SafeRepresenter.add_representer(
 class Logger(Protocol):
     def log_config(self, config_name: str, config1: dict | None = None, **config2): ...
 
-    def log_stats(self, function_name: str, stats1: dict | None = None, **stats2): ...
+    def log_stats(self, function_name: str, stats1: dict | None = None, temporary: bool = False, **stats2): ...
 
     def log_iter_stats(
         self, function_name: str, i: int, stats1: dict | None = None, **stats2
@@ -39,10 +39,11 @@ class ConsoleLogger(Logger):
         config = config2 if config1 is None else config1 | config2
         print(", ".join(f"{k}: {v}" for k, v in config.items()))
 
-    def log_stats(self, function_name: str, stats1: dict | None = None, **stats2):
-        self._log_new_function(function_name)
-        stats = stats2 if stats1 is None else stats1 | stats2
-        print(", ".join(f"{k}: {v}" for k, v in stats.items()))
+    def log_stats(self, function_name: str, stats1: dict | None = None, temporary: bool = False, **stats2):
+        if not temporary:
+            self._log_new_function(function_name)
+            stats = stats2 if stats1 is None else stats1 | stats2
+            print(", ".join(f"{k}: {v}" for k, v in stats.items()))
 
     def log_iter_stats(
         self, function_name: str, i: int, stats1: dict | None = None, **stats2
@@ -82,15 +83,9 @@ class FileLogger(Logger):
         config = config2 if config1 is None else config1 | config2
         self.info["config"][config_name] = config
 
-    def log_stats(self, function_name: str, stats1: dict | None = None, **stats2):
+    def log_stats(self, function_name: str, stats1: dict | None = None, temporary: bool = False, **stats2):
         stats = stats2 if stats1 is None else stats1 | stats2
-        if function_name in self.info:
-            prev = self.info[function_name]
-            prev = [prev] if not isinstance(prev, list) else prev
-            prev.append(stats)
-            self.info[function_name] = prev
-        else:
-            self.info[function_name] = stats
+        self.info[function_name] = stats
 
     def log_iter_stats(
         self, function_name: str, i: int, stats1: dict | None = None, **stats2
@@ -159,9 +154,9 @@ class JoinLoggers(Logger):
         for logger in self.loggers:
             logger.log_config(config_name, config1, **config2)
 
-    def log_stats(self, function_name: str, stats1: dict | None = None, **stats2):
+    def log_stats(self, function_name: str, stats1: dict | None = None, temporary: bool = False, **stats2):
         for logger in self.loggers:
-            logger.log_stats(function_name, stats1, **stats2)
+            logger.log_stats(function_name, stats1, temporary=temporary, **stats2)
 
     def log_iter_stats(
         self, function_name: str, i: int, stats1: dict | None = None, **stats2
@@ -182,7 +177,7 @@ class Silence(Logger):
     def log_config(self, config_name: str, config1: dict | None = None, **config2):
         pass
 
-    def log_stats(self, function_name: str, stats1: dict | None = None, **stats2):
+    def log_stats(self, function_name: str, stats1: dict | None = None, temporary: bool = False, **stats2):
         pass
 
     def log_iter_stats(

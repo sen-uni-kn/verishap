@@ -410,6 +410,7 @@ def multi_shap_bab(
             len(branches) == 0
             or jnp.allclose(shap_lbs, shap_ubs)
             or jnp.allclose(shap_ubs, shap_lbs)  # allclose is not symmetric
+            or jnp.any(shap_lbs > shap_ubs)  # invalid value bounds propagating
         ):
             break
 
@@ -445,15 +446,17 @@ def multi_shap_bab(
         num_fully_split = single_coalition.sum().item()
         num_tight = (tight_bounds & ~single_coalition).sum().item()
         num_invalid_bounds = invalid_bounds.sum().item()
-        total_fully_split += num_fully_split
-        total_tight_bounds += num_tight
 
-        if num_invalid_bounds > 0:
+        if num_invalid_bounds > 0 and total_invalid_bounds == 0:
             warn(
                 "Encountered invalid value bounds. "
                 f"Number of branches with invalid bounds: {num_invalid_bounds}",
                 stacklevel=1,
             )
+
+        total_invalid_bounds += num_invalid_bounds
+        total_fully_split += num_fully_split
+        total_tight_bounds += num_tight
 
         if log is not False:
             num_branches = len(branches)
@@ -466,8 +469,18 @@ def multi_shap_bab(
                 num_invalid_bounds=num_invalid_bounds,
             )
             log.log_bounds("multi_shap_bab", i, (shap_lbs, shap_ubs), name="φ")
+            total_branches = total_tight_bounds + total_fully_split
+            log.log_stats(
+                "multi_shap_bab",
+                {"runtimes": timer.runtimes, "iterations": i},
+                temporary=True,
+                total_branches=total_branches,
+                total_tight_bounds=total_tight_bounds,
+                total_fully_split=total_fully_split,
+                total_invalid_bounds=total_invalid_bounds,
+            )
 
-    total_branches = total_tight_bounds + total_fully_split
+    total_branches = total_tight_bounds + total_fully_split + total_invalid_bounds
     log.log_stats(
         "multi_shap_bab",
         {"runtimes": timer.runtimes, "iterations": i},

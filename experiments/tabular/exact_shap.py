@@ -1,4 +1,5 @@
 # Copyright 2025 David Boetius
+from functools import partial
 from pathlib import Path
 
 import pandas as pd
@@ -9,6 +10,7 @@ from shap_bounds.timer import Timer
 
 from ..runstats import machine_and_code_details
 from .argument_parser import TabularCmdArgs
+from .. import shaplib
 
 local_resoure_dir = Path(__file__).parent / "resources"
 local_output_dir = Path(__file__).parent / "output"
@@ -21,13 +23,16 @@ if __name__ == "__main__":
         .dataset_args()
         .feature_args()
         .shap_variant_args()
-        .estimator_args()
         .out_args()
         .parse_args()
     )
-    estimator = args.estimator()
+    estimator = partial(
+        shaplib.exact_shap,
+        args.model,
+        silent=args.silent,
+    )
     in_feature, out_feature = args.feature, args.output_feature
-    num_samples = args.num_samples
+    num_samples = 9223372036854775807
 
     loggers = [] if args.silent else [ConsoleLogger()]
     timer = Timer()
@@ -37,14 +42,14 @@ if __name__ == "__main__":
         logger.log_config("run_details", machine_and_code_details())
         logger.log_config("cmd_args", args.args.vars())
 
-        for n in tqdm(num_samples, disable=args.silent):
-            with timer["estimate"] as timer_context:
-                estims = estimator(num_samples=n)
-            if in_feature is None:
-                estims = estims[:, out_feature].squeeze()
-                estims = {i: v for i, v in enumerate(estims)}
-            else:
-                estim = estims[in_feature, out_feature]
-                estims = {in_feature: estim}
+        with timer["estimate"] as timer_context:
+            estims = estimator(num_samples=num_samples)
 
-            logger.log_iter_stats("estimate", n, {"runtime": timer_context.runtime}, **estims)
+        if in_feature is None:
+            estims = estims[:, out_feature].squeeze()
+            estims = {i: v for i, v in enumerate(estims)}
+        else:
+            estim = estims[in_feature, out_feature]
+            estims = {in_feature: estim}
+
+        logger.log_stats("overall", {"runtime": timer_context.runtime, "estimates": estims})
