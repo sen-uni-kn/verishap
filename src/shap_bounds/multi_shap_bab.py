@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import partial
 from typing import Callable, Literal
+from warnings import warn
 
 import jax
 import jax.numpy as jnp
@@ -264,8 +265,9 @@ def multi_shap_bab(
         single_coalition = (coali_lb == coali_ub).all(axis=data_axes)
         # Also prune branches with tight value bounds
         tight_bounds = jnp.isclose(branches.value_ub, branches.value_lb)
-        prune = single_coalition | tight_bounds
-        return prune, single_coalition, tight_bounds
+        invalid_bounds = branches.value_ub < branches.value_lb
+        prune = single_coalition | tight_bounds | invalid_bounds
+        return prune, single_coalition, tight_bounds, invalid_bounds
 
     # Compute SHAP bounds from value bounds
     zeros = jnp.zeros_like(base_mask, dtype=float)
@@ -401,10 +403,14 @@ def multi_shap_bab(
             )
 
     shap_lbs, shap_ubs = jax.tree.map(lambda x: x.squeeze(), shap_bounds(root_data))
-    total_tight_bounds = total_fully_split = 0
+    total_tight_bounds = total_fully_split = total_invalid_bounds = 0
     yield Box(shap_lbs.squeeze(), shap_ubs.squeeze())
     for i in it.count():
-        if len(branches) == 0 or jnp.allclose(shap_lbs, shap_ubs):
+        if (
+            len(branches) == 0
+            or jnp.allclose(shap_lbs, shap_ubs)
+            or jnp.allclose(shap_ubs, shap_lbs)  # allclose is not symmetric
+        ):
             break
 
         with timer["pop"]:
@@ -414,8 +420,9 @@ def multi_shap_bab(
                 new_branches,
                 priority,
                 ((old_shap_lbs, old_shap_ubs), (new_shap_lbs, new_shap_ubs)),
-                (prune, single_coalition, tight_bounds),
+                (prune, single_coalition, tight_bounds, invalid_bounds),
             ) = bab_step(batch, num_selected)
+
         with timer["update_shap_bounds"]:
             # the shap_lbs and shap_ubs still have branch axes
             shap_lbs = shap_lbs - old_shap_lbs.sum(axis=0) + new_shap_lbs.sum(axis=0)
@@ -437,8 +444,16 @@ def multi_shap_bab(
 
         num_fully_split = single_coalition.sum().item()
         num_tight = (tight_bounds & ~single_coalition).sum().item()
+        num_invalid_bounds = invalid_bounds.sum().item()
         total_fully_split += num_fully_split
         total_tight_bounds += num_tight
+
+        if num_invalid_bounds > 0:
+            warn(
+                "Encountered invalid value bounds. "
+                f"Number of branches with invalid bounds: {num_invalid_bounds}",
+                stacklevel=1,
+            )
 
         if log is not False:
             num_branches = len(branches)
@@ -448,6 +463,7 @@ def multi_shap_bab(
                 num_branches=num_branches,
                 num_fully_split=num_fully_split,
                 num_tight=num_tight,
+                num_invalid_bounds=num_invalid_bounds,
             )
             log.log_bounds("multi_shap_bab", i, (shap_lbs, shap_ubs), name="φ")
 
@@ -458,4 +474,5 @@ def multi_shap_bab(
         total_branches=total_branches,
         total_tight_bounds=total_tight_bounds,
         total_fully_split=total_fully_split,
+        total_invalid_bounds=total_invalid_bounds,
     )

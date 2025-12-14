@@ -1,31 +1,10 @@
 # Copyright 2025 David Boetius
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 from ucimlrepo import fetch_ucirepo
-
-
-def categorical_to_int(x: pd.DataFrame) -> pd.DataFrame:
-    for col in x.select_dtypes(include=["object"]).columns:
-        x.loc[:, col] = x[col].astype("category").cat.codes
-    return x
-
-
-def save_dataset(dataset_name: str):
-    def decorator(fn):
-        def wrapper(*args, root=".datasets", **kwargs):
-            file = Path(root) / f"{dataset_name}.npz"
-            if file.exists():
-                x = np.load(file)["x"]
-                y = np.load(file)["y"]
-                return x, y
-            else:
-                x, y = fn(*args, **kwargs)
-                np.savez(Path(root) / f"{dataset_name}.npz", x=x, y=y)
-                return x, y
-        return wrapper
-    return decorator
 
 
 def corrgroups(
@@ -165,17 +144,60 @@ def independentlinear(
     return x, y
 
 
-def german_credit() -> tuple[np.ndarray, np.ndarray]:
-    """German Credit Dataset from the UCI ML Repository."""
-    dataset = fetch_ucirepo(id=144)
+# ==============================================================================
+# UCI ML Repository Datasets
+# ==============================================================================
+
+
+def categorical_to_int(x: pd.DataFrame) -> pd.DataFrame:
+    for col in x.select_dtypes(include=["object"]).columns:
+        x.loc[:, col] = x[col].astype("category").cat.codes
+    return x
+
+
+def save_dataset(dataset_name: str):
+    def decorator(fn):
+        def wrapper(*args, root=".datasets", **kwargs):
+            file = Path(root) / f"{dataset_name}.npz"
+            if file.exists():
+                x = np.load(file)["x"]
+                y = np.load(file)["y"]
+                return x, y
+            else:
+                x, y = fn(*args, **kwargs)
+                np.savez(Path(root) / f"{dataset_name}.npz", x=x, y=y)
+                return x, y
+
+        return wrapper
+
+    return decorator
+
+
+def get_uci_dataset(id: int, targets: Literal["binary", "multiclass", "regression", "raw"] = "binary") -> tuple[np.ndarray, np.ndarray]:
+    """Obtain a dataset from the UCI ML Repository."""
+    dataset = fetch_ucirepo(id=id)
 
     x = dataset.data.features
     x = categorical_to_int(x)
     x = x.to_numpy().astype(np.float32)
+    x = np.nan_to_num(x)
 
     y = dataset.data.targets
-    y = (y > 1).to_numpy().astype(np.bool_)
+    match targets:
+        case "binary":
+            y = y.to_numpy().astype(np.bool_)
+        case "multiclass":
+            y = y.to_numpy().astype(np.int32).squeeze()
+        case "regression":
+            y = y.to_numpy().astype(np.float32)
 
+    return x, y
+
+
+def german_credit() -> tuple[np.ndarray, np.ndarray]:
+    """German Credit Dataset from the UCI ML Repository."""
+    x, y = get_uci_dataset(id=144, targets="raw")
+    y = (y > 1).to_numpy().astype(np.bool_)
     return x, y
 
 
@@ -190,14 +212,18 @@ def obesity() -> tuple[np.ndarray, np.ndarray]:
 
     x = dataset.data.features
     x.loc[:, "Gender"] = x["Gender"].map({"Male": 0, "Female": 1})
-    x.loc[:, "family_history_with_overweight"] = x["family_history_with_overweight"].map(
-        {"yes": 1, "no": 0}
-    )
+    x.loc[:, "family_history_with_overweight"] = x[
+        "family_history_with_overweight"
+    ].map({"yes": 1, "no": 0})
     x.loc[:, "FAVC"] = x["FAVC"].map({"yes": 1, "no": 0})
-    x.loc[:, "CAEC"] = x["CAEC"].map({"Sometimes": 1, "Frequently": 2, "Always": 3, "no": 0})
+    x.loc[:, "CAEC"] = x["CAEC"].map(
+        {"Sometimes": 1, "Frequently": 2, "Always": 3, "no": 0}
+    )
     x.loc[:, "SMOKE"] = x["SMOKE"].map({"yes": 1, "no": 0})
     x.loc[:, "SCC"] = x["SCC"].map({"yes": 1, "no": 0})
-    x.loc[:, "CALC"] = x["CALC"].map({"Sometimes": 1, "Frequently": 2, "Always": 3, "no": 0})
+    x.loc[:, "CALC"] = x["CALC"].map(
+        {"Sometimes": 1, "Frequently": 2, "Always": 3, "no": 0}
+    )
     x.loc[:, "MTRANS"] = x["MTRANS"].map(
         {
             "Automobile": 0,
@@ -251,28 +277,13 @@ def vehicles() -> tuple[np.ndarray, np.ndarray]:
 
 def parkinsons() -> tuple[np.ndarray, np.ndarray]:
     """Parkinsons Telemonitoring dataset from the UCI ML Repository."""
-    dataset = fetch_ucirepo(id=189)
+    return get_uci_dataset(id=189, targets="regression")
 
-    x = dataset.data.features
-    x = x.to_numpy().astype(np.float32)
-
-    y = dataset.data.targets
-    y = y.to_numpy().astype(np.float32)
-
-    return x, y
 
 @save_dataset("cdc_diabetes")
 def cdc_diabetes() -> tuple[np.ndarray, np.ndarray]:
     """Appartment for Rent Dataset from the UCI ML Repository."""
-    dataset = fetch_ucirepo(id=891)
-
-    x = dataset.data.features
-    x = x.to_numpy().astype(np.float32)
-
-    y = dataset.data.targets
-    y = y.to_numpy().astype(np.bool_)
-
-    return x, y
+    return get_uci_dataset(id=891, targets="binary")
 
 
 def mushroom() -> tuple[np.ndarray, np.ndarray]:
@@ -280,59 +291,28 @@ def mushroom() -> tuple[np.ndarray, np.ndarray]:
 
     Predict whether a mushroom is edible or poisonous.
     """
-    dataset = fetch_ucirepo(id=73)
-
-    x = dataset.data.features
-    x = categorical_to_int(x)
-    x = x.to_numpy().astype(np.float32)
-
-    y = dataset.data.targets
+    x, y = get_uci_dataset(id=73, targets="raw")
     y = (y == "p").to_numpy().astype(np.bool_)
-
     return x, y
 
 
 def default() -> tuple[np.ndarray, np.ndarray]:
     """Default of Credit Card Clients Dataset from the UCI ML Repository."""
-    dataset = fetch_ucirepo(id=350)
-
-    x = dataset.data.features
-    x = categorical_to_int(x)
-    x = x.to_numpy().astype(np.float32)
-
-    y = dataset.data.targets
-    y = y.to_numpy().astype(np.bool_)
-
-    return x, y
+    return get_uci_dataset(id=350, targets="binary")
 
 
 def automobile() -> tuple[np.ndarray, np.ndarray]:
     """Automobile Dataset from the UCI ML Repository."""
-    dataset = fetch_ucirepo(id=10)
-
-    x = dataset.data.features
-    x = categorical_to_int(x)
-    x = x.to_numpy().astype(np.float32)
-    x = np.nan_to_num(x)
-
-    y = dataset.data.targets
+    x, y = get_uci_dataset(id=10, targets="raw")
     y = y["symboling"]
     y = y.to_numpy().astype(np.float32)  # make this a regression task
-
     return x, y
 
 
 def steel() -> tuple[np.ndarray, np.ndarray]:
     """Steel Plates Faults Dataset from the UCI ML Repository."""
-    dataset = fetch_ucirepo(id=198)
+    return get_uci_dataset(id=198, targets="regression")
 
-    x = dataset.data.features
-    x = x.to_numpy().astype(np.float32)
-
-    y = dataset.data.targets
-    y = y.to_numpy().astype(np.float32)  # make this a regression task
-
-    return x, y
 
 @save_dataset("uci_appliances_energy_prediction")
 def appliances() -> tuple[np.ndarray, np.ndarray]:
@@ -353,135 +333,108 @@ def hepatitis() -> tuple[np.ndarray, np.ndarray]:
     """Hepatitis C Virus (HCV) for Egyptian patients Dataset from
     the UCI ML Repository.
     """
-    dataset = fetch_ucirepo(id=503)
-
-    x = dataset.data.features
-    x = categorical_to_int(x)
-    x = x.to_numpy().astype(np.float32)
-
-    y = dataset.data.targets
-    y = y.iloc[:, 0] - 1
-    y = y.to_numpy().astype(np.int32)
-
+    x, y = get_uci_dataset(id=503, targets="multiclass")
+    y = y - 1
     return x, y
 
 
 def breast_cancer() -> tuple[np.ndarray, np.ndarray]:
     """Breast Cancer Dataset from the UCI ML Repository."""
-    dataset = fetch_ucirepo(id=17)
-
-    x = dataset.data.features
-    x = x.to_numpy().astype(np.float32)
-
-    y = dataset.data.targets
+    x, y = get_uci_dataset(id=17, targets="raw")
     y = (y == "M").to_numpy().astype(np.bool_)
-
     return x, y
 
 
 def infrared_temperature() -> tuple[np.ndarray, np.ndarray]:
     """Infrared Thermography Temperature Dataset from the UCI ML Repository."""
-    dataset = fetch_ucirepo(id=925)
-
-    x = dataset.data.features
-    x = categorical_to_int(x)
-    x = x.to_numpy().astype(np.float32)
-    x = np.nan_to_num(x)
-
-    y = dataset.data.targets
-    y = y.to_numpy().astype(np.float32)
-
-    return x, y
-
+    return get_uci_dataset(id=925, targets="regression")
 
 
 def ionosphere() -> tuple[np.ndarray, np.ndarray]:
     """Ionosphere Dataset from the UCI ML Repository."""
-    dataset = fetch_ucirepo(id=52)
-
-    x = dataset.data.features
-    x = x.to_numpy().astype(np.float32)
-
-    y = dataset.data.targets
+    x, y = get_uci_dataset(id=52, targets="raw")
     y = (y == "g").to_numpy().astype(np.bool_)
-
     return x, y
 
 
 def dropout() -> tuple[np.ndarray, np.ndarray]:
     """Student Dropout and Academic Success Dataset from the UCI ML Repository."""
-    dataset = fetch_ucirepo(id=697)
-
-    x = dataset.data.features
-    x = x.to_numpy().astype(np.float32)
-
-    y = dataset.data.targets
+    x, y = get_uci_dataset(id=697, targets="raw")
     y = (y == "Dropout").to_numpy().astype(np.bool_)  # make binary classification task
-
     return x, y
 
 
 def annealing() -> tuple[np.ndarray, np.ndarray]:
     """Annealing Dataset from the UCI ML Repository."""
-    dataset = fetch_ucirepo(id=3)
-
-    x = dataset.data.features
-    x = categorical_to_int(x)
-    x = x.to_numpy().astype(np.float32)
-    x = np.nan_to_num(x)
-
-    y = dataset.data.targets
+    x, y = get_uci_dataset(id=3, targets="raw")
     y = (y != "3").to_numpy().astype(np.bool_)  # make binary classification task
-
     return x, y
 
 
 @save_dataset("uci_census_income_kdd")
 def support2() -> tuple[np.ndarray, np.ndarray]:
     """Support2 Dataset from the UCI ML Repository."""
-    dataset = fetch_ucirepo(id=880)
-
-    x = dataset.data.features
-    x = categorical_to_int(x)
-    x = x.to_numpy().astype(np.float32)
-    x = np.nan_to_num(x)
-
-    y = dataset.data.targets
-    y = y["death"]
-    y = y.to_numpy().astype(np.bool_)
-
+    x, y = get_uci_dataset(id=880, targets="raw")
+    y = y["death"].to_numpy().astype(np.bool_)
     return x, y
-
 
 
 @save_dataset("uci_diabetes130")
 def diabetes130() -> tuple[np.ndarray, np.ndarray]:
     """Diabetes j130 Dataset from the UCI ML Repository."""
-    dataset = fetch_ucirepo(id=296)
-
-    x = dataset.data.features
-    x = categorical_to_int(x)
-    x = x.to_numpy().astype(np.float32)
-    x = np.nan_to_num(x)
-
-    y = dataset.data.targets
+    x, y = get_uci_dataset(id=296, targets="raw")
     y = (y != "NO").to_numpy().astype(np.bool_)  # make binary classification task
-
     return x, y
-
-
 
 
 @save_dataset("uci_covertype")
 def covertype() -> tuple[np.ndarray, np.ndarray]:
     """Covertype Dataset from the UCI ML Repository."""
-    dataset = fetch_ucirepo(id=31)
-
-    x = dataset.data.features
-    x = x.to_numpy().astype(np.float32)
-
-    y = dataset.data.targets
+    x, y = get_uci_dataset(id=31, targets="raw")
     y = categorical_to_int(y) - 1
     y = y.to_numpy().astype(np.int32).squeeze()
-
     return x, y
+
+
+def lung_cancer() -> tuple[np.ndarray, np.ndarray]:
+    """Lung Cancer Dataset from the UCI ML Repository."""
+    x, y = get_uci_dataset(id=62, targets="raw")
+    y = categorical_to_int(y) - 1
+    y = y.to_numpy().astype(np.int32).squeeze()
+    return x, y
+
+def spambase() -> tuple[np.ndarray, np.ndarray]:
+    """Spambase Dataset from the UCI ML Repository."""
+    return get_uci_dataset(id=94, targets="binary")
+
+@save_dataset("uci_online_news_popularity")
+def online_news() -> tuple[np.ndarray, np.ndarray]:
+    """Online News Popularity Dataset from the UCI ML Repository."""
+    x, y = get_uci_dataset(id=332, targets="raw")
+    # the regression task is too hard, make this a binary classification task
+    y = (y > y.median()).to_numpy().astype(np.bool_)
+    return x, y
+
+
+def sonar() -> tuple[np.ndarray, np.ndarray]:
+    """Connectionist Bench (Sonar, Mines vs. Rocks) Dataset from the UCI ML Repository."""
+    return get_uci_dataset(id=151, targets="binary")
+
+
+def handwritten_digits() -> tuple[np.ndarray, np.ndarray]:
+    """Handwritten Digits Dataset from the UCI ML Repository."""
+    return get_uci_dataset(id=80, targets="multiclass")
+
+
+@save_dataset("uci_rt_iot2022")
+def rt_iot() -> tuple[np.ndarray, np.ndarray]:
+    """RT-IoT 2022 Dataset from the UCI ML Repository."""
+    x, y = get_uci_dataset(id=942, targets="raw")
+    y = categorical_to_int(y) - 1
+    y = y.to_numpy().astype(np.int32).squeeze()
+    return x, y
+
+
+def bankruptcy() -> tuple[np.ndarray, np.ndarray]:
+    """Taiwanese Bankruptcy Dataset from the UCI ML Repository."""
+    return get_uci_dataset(id=572, targets="binary")
