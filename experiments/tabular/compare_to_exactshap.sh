@@ -57,24 +57,24 @@ for network in "${NETWORKS[@]}"; do
 
     OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/warmup/ExactSHAP/${network_name}"
     mkdir -p "$OUT_DIR"
-    timeout "$TIMEOUT" \
-      python -m experiments.tabular.exact_shap \
-        --model "experiments/tabular/resources/${network}" \
-        --input 0 --output-feature 0 \
-        --shap-variant "zero-baseline" \
-        --out "$OUT_DIR" \
-
-    printf "\n\nRunning ExactSHAP on ${network}...\n"
-
-    OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/ExactSHAP/${network_name}"
-    mkdir -p "$OUT_DIR"
     timeout "$EXACTSHAP_WARMUP_TIMEOUT" \
       python -m experiments.tabular.exact_shap \
         --model "experiments/tabular/resources/${network}" \
         --input 0 --output-feature 0 \
         --shap-variant "zero-baseline" \
         --out "$OUT_DIR" \
+
+    OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/ExactSHAP/${network_name}"
+    mkdir -p "$OUT_DIR"
+    timeout "$TIMEOUT" \
+      python -m experiments.tabular.exact_shap \
+        --model "experiments/tabular/resources/${network}" \
+        --input 0 --output-feature 0 \
+        --shap-variant "zero-baseline" \
+        --out "$OUT_DIR" \
         --silent
+
+    printf "\n\nRunning ExactSHAP on ${network}...\n"
     
     retVal=$?
     if [ $retVal -eq 124 ]; then  # timeout returns 124 if the timeout is reached
