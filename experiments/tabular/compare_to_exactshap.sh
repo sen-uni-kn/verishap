@@ -99,7 +99,7 @@ for network in "${NETWORKS[@]}"; do
 
   printf "\n\nRunning Branch and Bound on ${network}...\n"
 
-  OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/warmup/BaB/${network_name}"
+  OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/BaB/${network_name}"
   mkdir -p "$OUT_DIR"
   timeout "$HARD_TIMEOUT" \
     python -m experiments.tabular.bound \
