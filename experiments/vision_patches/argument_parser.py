@@ -32,6 +32,10 @@ class VisionPatchesCmdArgs(CmdArgs):
     # =========================================================================
 
     @property
+    def img_shape(self) -> tuple[int, int, int]:
+        return self.sample.shape
+
+    @property
     def shap_variant(self) -> str:
         if "superfeature" in self.args.shap_variant:
             return self.args.shap_variant
@@ -40,14 +44,15 @@ class VisionPatchesCmdArgs(CmdArgs):
 
     @property
     def num_patches(self) -> tuple[tuple[int, int], int]:
+        img_shape = self.img_shape
         num_patches = self.args.num_patches
         try:
             num_patches = int(num_patches)
             num_patches = (num_patches, num_patches)
         except ValueError:
             num_patches = tuple(int(x) for x in num_patches.split(","))
-        assert num_patches[0] <= 28
-        assert num_patches[1] <= 28
+        assert num_patches[0] <= img_shape[1]
+        assert num_patches[1] <= img_shape[2]
         total_patches = num_patches[0] * num_patches[1]
         num_patches = (1, *num_patches)
         return num_patches, total_patches
@@ -70,9 +75,8 @@ class VisionPatchesCmdArgs(CmdArgs):
         # create patch masks
         num_patches, total_patches = self.num_patches
 
-        img_size = (1, 28, 28)
         mask_idx = jnp.arange(total_patches).reshape(num_patches)
-        mask_idx = jax.image.resize(mask_idx, img_size, "nearest")
+        mask_idx = jax.image.resize(mask_idx, self.img_shape, "nearest")
         masks = jnp.arange(total_patches).reshape((total_patches, 1, 1, 1)) == mask_idx
         return masks
 

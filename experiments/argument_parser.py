@@ -37,18 +37,28 @@ class NumpyVisionDataset:
         shape: tuple[int, ...],
         mid = 0.0,
         ran = 1.0,
+        channel_last = False,
     ):
         self.dataset = dataset
         self.shape = shape
         self.mid = mid
         self.ran = ran
+        self.channel_last = channel_last
 
     def __getitem__(self, index) -> np.ndarray:
-        data = self.dataset.data[index].numpy()
-        if self.shape[0] == 1 and data.ndim == 3:
+        data = self.dataset.data[index]
+        if isinstance(data, torch.Tensor):
+            data = data.numpy()
+        assert isinstance(data, np.ndarray)
+        if self.channel_last:
+            if data.ndim == 3:
+                data = np.moveaxis(data, -1, 0)
+            else:
+                data = np.moveaxis(data, -1, 0)
+        if self.shape[0] == 1 and data.ndim == 2:
             batch_shape = data.shape[:-2]
         else:
-            batch_shape = data.shape[:-2]
+            batch_shape = data.shape[:-3]
         data = data.reshape(*batch_shape, *self.shape)
         data = data / 255.0
         data = (data - self.mid) / self.ran
