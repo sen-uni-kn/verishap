@@ -4,7 +4,29 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
+import shap.datasets
 from ucimlrepo import fetch_ucirepo
+
+
+def load_dataset(dataset: str) -> tuple[np.ndarray, np.ndarray]:
+    """Loads a tabular dataset."""
+    if dataset.startswith("corrgroups"):
+        num_features = int(dataset[-2:])
+        data, targets = corrgroups(num_features)
+    elif dataset.startswith("independentlinear"):
+        num_features = int(dataset[-2:])
+        data, targets = independentlinear(num_features)
+    elif hasattr(globals(), dataset):
+        data, targets = getattr(globals(), dataset)()
+    elif hasattr(shap.datasets, dataset):
+        data, targets = getattr(shap.datasets, dataset)()
+        data = data.to_numpy().astype(np.float32)
+        data = np.nan_to_num(data)
+    else:
+        raise ValueError(f"Dataset {dataset} not found.")
+    return data, targets
+
+
 
 
 def corrgroups(

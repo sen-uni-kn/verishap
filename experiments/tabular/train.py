@@ -14,7 +14,7 @@ from optax.losses import sigmoid_binary_cross_entropy as binary_cross_entropy
 from optax.losses import softmax_cross_entropy_with_integer_labels as cross_entropy
 from sklearn.model_selection import train_test_split
 
-from .models import MLP
+from ..models import MLP
 from .utils import load_dataset
 
 if __name__ == "__main__":

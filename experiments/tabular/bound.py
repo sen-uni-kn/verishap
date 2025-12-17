@@ -11,14 +11,13 @@ from shap_bounds.timer import Timer
 from ..runstats import machine_and_code_details
 from .argument_parser import TabularCmdArgs
 
-local_resoure_dir = Path(__file__).parent / "resources"
 local_output_dir = Path(__file__).parent / "output"
 
 
 if __name__ == "__main__":
     args = (
         TabularCmdArgs()
-        .model_args(local_resoure_dir)
+        .model_args()
         .dataset_args()
         .feature_args()
         .shap_variant_args()

@@ -4,16 +4,15 @@ from pathlib import Path
 import pandas as pd
 from tqdm import tqdm
 
-from .argument_parser import MNISTCmdArgs
+from .argument_parser import VisionPatchesCmdArgs
 
-local_resoure_dir = Path(__file__).parent / "resources"
 local_output_dir = Path(__file__).parent / "output"
 
 
 if __name__ == "__main__":
     args = (
-        MNISTCmdArgs()
-        .model_args(local_resoure_dir)
+        VisionPatchesCmdArgs()
+        .model_args()
         .dataset_args()
         .segmentation_args()
         .feature_args()

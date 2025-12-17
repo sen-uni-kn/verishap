@@ -11,8 +11,8 @@ import jax
 import numpy as np
 
 from ..argument_parser import CmdArgs
-from .models import MLP
-from .utils import load_dataset
+from ..datasets import load_dataset
+from ..models import MLP
 
 
 class TabularCmdArgs(CmdArgs):

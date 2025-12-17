@@ -5,16 +5,15 @@ from pathlib import Path
 from shap_bounds.logger import ConsoleLogger, FileLogger, JoinLoggers
 from shap_bounds.timer import Timer
 
-from .argument_parser import MNISTCmdArgs
+from .argument_parser import VisionPatchesCmdArgs
 
-local_resoure_dir = Path(__file__).parent / "resources"
 local_output_dir = Path(__file__).parent / "output"
 
 
 if __name__ == "__main__":
     args = (
-        MNISTCmdArgs()
-        .model_args(local_resoure_dir / "mnist-cnn-batchnorm.eqxparams")
+        VisionPatchesCmdArgs()
+        .model_args()
         .dataset_args()
         .segmentation_args()
         .feature_args()

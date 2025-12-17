@@ -1,82 +1,35 @@
 # Copyright 2025 David Boetius
 """Utilities for parsing command line arguments for MNIST experiments."""
 
-from collections.abc import Iterable
-from functools import partial
-from typing import Callable, Iterator
+from pathlib import Path
 
-import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
-import torch
-import torchvision
 
 from ..argument_parser import CmdArgs
-from .models import CNN
 
 
-class NumpyDataset:
-    def __init__(self, dataset: torch.utils.data.Dataset):
-        self.dataset = dataset
-
-    def __getitem__(self, index) -> np.ndarray:
-        data = self.dataset.data[index].numpy()
-        data = data.reshape(*data.shape[:-2], 1, 28, 28)
-        data = data / 255.0
-        return data
-
-    def __iter__(self) -> Iterator[np.ndarray]:
-        for index in range(len(self.dataset)):
-            yield self[index]
-
-    def __len__(self) -> int:
-        return len(self.dataset)
-
-
-class MNISTCmdArgs(CmdArgs):
+class VisionPatchesCmdArgs(CmdArgs):
     def __init__(self, *parser_args, **parser_kwargs):
         super().__init__(*parser_args, **parser_kwargs)
 
-    def dataset_args(
-        self, default_dataset: str = None, default_data_index: int = 0
-    ) -> "MNISTCmdArgs":
-        self.data_index_args(default_data_index)
-        return self
+    def model_args(self, default_model: Path | None = None) -> "VisionPatchesCmdArgs":
+        if default_model is None:
+            resoure_dir = Path(__file__).parent.parent / "resources"
+            default_model = resoure_dir / "mnist-cnn.eqx"
+        return super().model_args(default_model)
 
-    def segmentation_args(self) -> "MNISTCmdArgs":
+    def segmentation_args(self) -> "VisionPatchesCmdArgs":
         self.parser.add_argument(
             "--num-patches",
             type=str,
-            default="28,28",
+            default="5,5",
             help="The number of patches to consider as features.",
         )
         return self
 
     # =========================================================================
-
-    @property
-    def data(self) -> Iterable[np.ndarray]:
-        testset = torchvision.datasets.MNIST(
-            ".datasets",
-            train=False,
-            download=True,
-            transform=torchvision.transforms.ToTensor(),
-        )
-        return NumpyDataset(testset)
-
-    @property
-    def model(self) -> Callable:
-        model_, state = eqx.nn.make_with_state(CNN)(jax.random.PRNGKey(0))
-        model_, state = eqx.tree_deserialise_leaves(self.args.model, (model_, state))
-        model_ = eqx.nn.inference_mode(model_)
-
-        @partial(jax.vmap, axis_name="batch")
-        def model(x):
-            y, _ = model_(x, state)
-            return y
-
-        return model
 
     @property
     def shap_variant(self) -> str:

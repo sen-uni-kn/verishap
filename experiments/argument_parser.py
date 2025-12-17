@@ -2,16 +2,18 @@
 """Utilities for parsing command line arguments."""
 
 import argparse
-from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable
 
+import equinox as eqx
+import jax
 import jax.numpy as jnp
 import numpy as np
 import torch
+import torchvision
 
 from shap_bounds import (
     baseline_value,
@@ -23,10 +25,44 @@ from shap_bounds import (
 from shap_bounds.logger import Logger
 
 from . import shaplib
+from .datasets import load_dataset
 from .leverageshap import leverage_shap
+from .models import CNN, MLP
 
 
-class CmdArgs(ABC):
+class NumpyVisionDataset:
+    def __init__(
+        self,
+        dataset: torch.utils.data.Dataset,
+        shape: tuple[int, ...],
+        mid = 0.0,
+        ran = 1.0,
+    ):
+        self.dataset = dataset
+        self.shape = shape
+        self.mid = mid
+        self.ran = ran
+
+    def __getitem__(self, index) -> np.ndarray:
+        data = self.dataset.data[index].numpy()
+        if self.shape[0] == 1 and data.ndim == 3:
+            batch_shape = data.shape[:-2]
+        else:
+            batch_shape = data.shape[:-2]
+        data = data.reshape(*batch_shape, *self.shape)
+        data = data / 255.0
+        data = (data - self.mid) / self.ran
+        return data
+
+    def __iter__(self) -> Iterator[np.ndarray]:
+        for index in range(len(self.dataset)):
+            yield self[index]
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+
+class CmdArgs:
     def __init__(self, *parser_args, **parser_kwargs):
         np.random.seed(0)
         torch.manual_seed(0)
@@ -181,16 +217,47 @@ class CmdArgs(ABC):
         return {key: str(value) for key, value in vars(self.args).items()}
 
     @property
-    @abstractmethod
-    def model(self) -> Callable:
-        """Obtain the model as a callable."""
-        raise NotImplementedError
+    def data(self) -> Iterable[np.ndarray]:
+        dataset = self.args.dataset
+        if dataset is None:
+            dataset = self.args.model.stem.split("-")[0]
+        if dataset.lower() == "mnist":
+            testset = torchvision.datasets.MNIST(
+                ".datasets",
+                train=False,
+                download=True,
+                transform=torchvision.transforms.ToTensor(),
+            )
+            return NumpyVisionDataset(testset, shape=(1, 28, 28))
+        elif dataset.lower() == "cifar10":
+            testset = torchvision.datasets.CIFAR10(
+                ".datasets",
+                train=False,
+                download=True,
+                transform=torchvision.transforms.ToTensor(),
+            )
+            return NumpyVisionDataset(testset, shape=(3, 32, 32))
+        else:
+            data, _ = load_dataset(dataset)
+        return data
 
     @property
-    @abstractmethod
-    def data(self) -> Iterable[np.ndarray]:
-        """Obtain the data as a numpy array or indexable dataset."""
-        raise NotImplementedError
+    def model(self) -> Callable:
+        if "cnn" in self.args.model.stem.lower():
+            model_, state = CNN.load(self.args.model)
+            model_ = eqx.nn.inference_mode(model_)
+
+            @partial(jax.vmap, axis_name="batch")
+            def model(x):
+                y, _ = model_(x, state)
+                return y
+
+            return model
+        else:
+            model = MLP.load(self.args.model)
+            model = eqx.nn.inference_mode(model)
+            model = jax.vmap(model, axis_name="batch")
+            return model
 
     @property
     def masks(self) -> np.ndarray | None:
@@ -360,7 +427,7 @@ class CmdArgs(ABC):
 
         seed = self.args.seed
         np.random.seed(seed)
-        torch.manual_seed(seed+1)
+        torch.manual_seed(seed + 1)
         return estimator
 
     @property

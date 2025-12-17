@@ -24,7 +24,7 @@ LEARNING_RATE = 3e-4
 EPOCHS = 10
 PRINT_EVERY = 100
 SEED = 1708
-OUT_FILE = "mnist-cnn.eqxparams"
+OUT_FILE = "mnist-cnn.eqx"
 
 if __name__ == "__main__":
     key = jax.random.PRNGKey(SEED)
@@ -72,7 +72,13 @@ if __name__ == "__main__":
     # ==============================================================================
 
     key, subkey = jax.random.split(key, 2)
-    model, state = eqx.nn.make_with_state(CNN)(subkey)
+    model, state = eqx.nn.make_with_state(CNN)(
+        (1, 28, 28),
+        10,
+        subkey,
+        conv_layers=[{"channels": 4}, {"channels": 8}],
+        fc_in_sizes=(392, 64),
+    )
 
     print("=" * 80)
     print("Model:")
@@ -189,4 +195,4 @@ if __name__ == "__main__":
     optim = optax.adamw(LEARNING_RATE)
     model, state = train(model, state, trainset, testset, optim, EPOCHS, PRINT_EVERY)
 
-    eqx.tree_serialise_leaves(OUT_FILE, (model, state))
+    CNN.save(model, state, OUT_FILE)
