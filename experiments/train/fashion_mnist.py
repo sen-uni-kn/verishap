@@ -13,18 +13,18 @@ from jaxtyping import Array, Float, Int, PyTree
 from optax.losses import softmax_cross_entropy_with_integer_labels as cross_entropy
 from torch.utils.data import DataLoader, Dataset
 
-from .models import CNN
+from ..models import CNN
 
 # ==============================================================================
 # Hyperparameters
 # ==============================================================================
 
-BATCH_SIZE = 128
+BATCH_SIZE = 100
 LEARNING_RATE = 3e-4
-EPOCHS = 10
+EPOCHS = 100
 PRINT_EVERY = 100
 SEED = 1708
-OUT_FILE = "mnist-cnn.eqx"
+OUT_FILE = "fashion-mnist-cnn.eqx"
 
 if __name__ == "__main__":
     key = jax.random.PRNGKey(SEED)
@@ -35,15 +35,15 @@ if __name__ == "__main__":
     # ==============================================================================
 
     print("=" * 80)
-    print("Downloading MNIST dataset...")
+    print("Downloading Fashion MNIST dataset...")
 
-    trainset = torchvision.datasets.MNIST(
+    trainset = torchvision.datasets.FashionMNIST(
         ".datasets",
         train=True,
         download=True,
         transform=torchvision.transforms.ToTensor(),
     )
-    testset = torchvision.datasets.MNIST(
+    testset = torchvision.datasets.FashionMNIST(
         ".datasets",
         train=False,
         download=True,
@@ -51,7 +51,7 @@ if __name__ == "__main__":
     )
 
     @dataclass
-    class MNISTDataset:
+    class FashionMNISTDataset:
         data: np.ndarray
         targets: np.ndarray
 
@@ -64,8 +64,8 @@ if __name__ == "__main__":
             return len(self.data)
 
     print("Loading datasets into memory...")
-    trainset = MNISTDataset(trainset)
-    testset = MNISTDataset(testset)
+    trainset = FashionMNISTDataset(trainset)
+    testset = FashionMNISTDataset(testset)
 
     # ==============================================================================
     # Model

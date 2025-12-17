@@ -1,6 +1,7 @@
 # Copyright 2025 David Boetius
 # Adapted from https://docs.kidger.site/equinox/examples/mnist/
-from functools import partial
+import itertools as it
+from dataclasses import dataclass
 
 import equinox as eqx
 import jax
@@ -8,29 +9,22 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 import torchvision
-from jaxtyping import Array, Bool, Float, Int, PyTree
+from jaxtyping import Array, Float, Int, PyTree
 from optax.losses import softmax_cross_entropy_with_integer_labels as cross_entropy
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 
-from .models import CNN
+from ..models import CNN
 
 # ==============================================================================
 # Hyperparameters
 # ==============================================================================
 
-BATCH_SIZE = 64
-LEARNING_RATE = 1e-4
-EPOCHS = 10
+BATCH_SIZE = 128
+LEARNING_RATE = 3e-4
+EPOCHS = 100
 PRINT_EVERY = 100
-SEED = 1939
-OUT_FILE = "cifar10-cnn.eqxparams"
-MODEL_CLS = partial(
-    CNN,
-    (3, 32, 32),
-    10,
-    conv_layers=[{"channels": 4}, {"channels": 8}],
-    fc_in_sizes=(512, 64),
-)
+SEED = 1708
+OUT_FILE = "mnist-cnn.eqx"
 
 if __name__ == "__main__":
     key = jax.random.PRNGKey(SEED)
@@ -41,27 +35,50 @@ if __name__ == "__main__":
     # ==============================================================================
 
     print("=" * 80)
-    print("Downloading CIFAR10 dataset...")
+    print("Downloading MNIST dataset...")
 
-    trainset = torchvision.datasets.CIFAR10(
+    trainset = torchvision.datasets.MNIST(
         ".datasets",
         train=True,
         download=True,
         transform=torchvision.transforms.ToTensor(),
     )
-    testset = torchvision.datasets.CIFAR10(
+    testset = torchvision.datasets.MNIST(
         ".datasets",
         train=False,
         download=True,
         transform=torchvision.transforms.ToTensor(),
     )
 
+    @dataclass
+    class MNISTDataset:
+        data: np.ndarray
+        targets: np.ndarray
+
+        def __init__(self, dataset: Dataset):
+            data, targets = next(iter(DataLoader(dataset, batch_size=len(dataset))))
+            self.data = data.numpy()
+            self.targets = targets.numpy()
+
+        def __len__(self):
+            return len(self.data)
+
+    print("Loading datasets into memory...")
+    trainset = MNISTDataset(trainset)
+    testset = MNISTDataset(testset)
+
     # ==============================================================================
     # Model
     # ==============================================================================
 
     key, subkey = jax.random.split(key, 2)
-    model, state = eqx.nn.make_with_state(MODEL_CLS)(subkey)
+    model, state = eqx.nn.make_with_state(CNN)(
+        (1, 28, 28),
+        10,
+        subkey,
+        conv_layers=[{"channels": 4}, {"channels": 8}],
+        fc_in_sizes=(392, 64),
+    )
 
     print("=" * 80)
     print("Model:")
@@ -73,25 +90,13 @@ if __name__ == "__main__":
 
     print("=" * 80)
     print("Training...")
-
-    train_loader = DataLoader(trainset, batch_size=BATCH_SIZE, shuffle=True)
-    train_loader2 = DataLoader(trainset, batch_size=10 * BATCH_SIZE, shuffle=True)
-    test_loader = DataLoader(testset, batch_size=10 * BATCH_SIZE, shuffle=False)
-
-    # def map_labels(labels: Int[Array, " batch"]) -> Bool[Array, " batch"]:
-    #     """Transforms 10 CIFAR10 labels into animal vs. vehicle labels.
-
-    #     Returns:
-    #         - 0 if the label is an animal label
-    #         - 1 if the label is a vehicle label
-    #     """
-    #     return (labels == 0) | (labels == 1) | (labels == 8) | (labels == 9)
+    # MNIST fits into memory, so we don't use data loaders.
 
     @eqx.filter_jit
     def accuracy(
-        model: MODEL_CLS,
+        model: CNN,
         state: PyTree,
-        x: Float[Array, "batch 3 32 32"],
+        x: Float[Array, "batch 1 28 28"],
         y: Int[Array, " batch"],
     ) -> tuple[Float[Array, ""], PyTree]:
         """This function takes as input the current model
@@ -101,60 +106,54 @@ if __name__ == "__main__":
             model, axis_name="batch", in_axes=(0, None), out_axes=(0, None)
         )
         pred_y, state = model(x, state)
-        # Animals vs. vehicles
-        # pred_y = pred_y >= 0
-        # acc = jnp.mean(map_labels(y) == pred_y)
-        # return acc, state
         pred_y = jnp.argmax(pred_y, axis=1)
         acc = jnp.mean(y == pred_y)
         return acc, state
 
     @eqx.filter_jit
     def loss(
-        model: MODEL_CLS,
+        model: CNN,
         state: PyTree,
-        x: Float[Array, "batch 3 32 32"],
+        x: Float[Array, "batch 1 28 28"],
         y: Int[Array, " batch"],
     ) -> tuple[Float[Array, ""], PyTree]:
-        # y = map_labels(y)
+        # Our input has the shape (BATCH_SIZE, 1, 28, 28), but our model operations on
+        # a single input input image of shape (1, 28, 28).
+        #
+        # Therefore, we have to use jax.vmap, which in this case maps our model over the
+        # leading (batch) axis.
         model = jax.vmap(
             model, axis_name="batch", in_axes=(0, None), out_axes=(0, None)
         )
         pred_y, state = model(x, state)
-        # loss = sigmoid_binary_cross_entropy(pred_y, y).mean()
         loss = cross_entropy(pred_y, y).mean()
         return loss, state
 
-    def evaluate(
-        model: MODEL_CLS, state: PyTree, loader: DataLoader
-    ) -> tuple[float, float]:
+    def evaluate(model: CNN, state: PyTree, dataset: Dataset) -> tuple[float, float]:
         """Computes average loss and accuracy over a dataset."""
         inference_model = eqx.nn.inference_mode(model)
-        loss_val = 0.0
-        acc_val = 0.0
-        for x, y in loader:
-            x, y = x.numpy(), y.numpy()
-            loss_val += loss(inference_model, state, x, y)[0]
-            acc_val += accuracy(inference_model, state, x, y)[0]
-        return loss_val / len(loader), acc_val / len(loader)
+        x, y = dataset.data, dataset.targets
+        loss_val, _ = loss(inference_model, state, x, y)
+        acc_val, _ = accuracy(inference_model, state, x, y)
+        return loss_val, acc_val
 
     def train(
-        model: MODEL_CLS,
+        model: CNN,
         state: PyTree,
-        train_loader: DataLoader,
-        test_loader: DataLoader,
+        trainset: Dataset,
+        testset: Dataset,
         optim: optax.GradientTransformation,
         epochs: int,
         print_every: int,
-    ) -> MODEL_CLS:
+    ) -> CNN:
         opt_state = optim.init(eqx.filter(model, eqx.is_array))
 
         @eqx.filter_jit
         def train_step(
-            model: MODEL_CLS,
+            model: CNN,
             state: PyTree,
             opt_state: PyTree,
-            x: Float[Array, "batch 3 32 32"],
+            x: Float[Array, "batch 1 28 28"],
             y: Int[Array, " batch"],
         ):
             (loss_value, state), grads = eqx.filter_value_and_grad(loss, has_aux=True)(
@@ -166,18 +165,23 @@ if __name__ == "__main__":
             model = eqx.apply_updates(model, updates)
             return model, state, opt_state, loss_value
 
-        epoch_len = len(train_loader)
+        x, y = trainset.data, trainset.targets
+        epoch_len = len(trainset) // BATCH_SIZE
 
         for epoch in range(epochs):
-            for i, (x_batch, y_batch) in enumerate(iter(train_loader)):
-                x_batch, y_batch = x_batch.numpy(), y_batch.numpy()
+            perm = np.random.permutation(len(trainset))
+
+            for i, train_idx in enumerate(it.batched(perm, BATCH_SIZE)):
+                train_idx = np.array(train_idx)
+                x_batch = x[train_idx]
+                y_batch = y[train_idx]
                 model, state, opt_state, train_loss = train_step(
                     model, state, opt_state, x_batch, y_batch
                 )
 
                 if (i % print_every) == 0 or (i == epoch_len - 1):
-                    train_loss, train_accuracy = evaluate(model, state, train_loader2)
-                    test_loss, test_accuracy = evaluate(model, state, test_loader)
+                    train_loss, train_accuracy = evaluate(model, state, trainset)
+                    test_loss, test_accuracy = evaluate(model, state, testset)
                     progress = (i + 1) / epoch_len
                     print(
                         f"[{epoch + 1}/{epochs} {progress:4.0%}] "
@@ -189,8 +193,6 @@ if __name__ == "__main__":
         return model, state
 
     optim = optax.adamw(LEARNING_RATE)
-    model, state = train(
-        model, state, train_loader, test_loader, optim, EPOCHS, PRINT_EVERY
-    )
+    model, state = train(model, state, trainset, testset, optim, EPOCHS, PRINT_EVERY)
 
-    type(model).save(model, state, OUT_FILE)
+    CNN.save(model, state, OUT_FILE)

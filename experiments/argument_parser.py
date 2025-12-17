@@ -14,6 +14,7 @@ import jax.numpy as jnp
 import numpy as np
 import torch
 import torchvision
+from torch.utils.data import DataLoader
 
 from shap_bounds import (
     baseline_value,
@@ -35,9 +36,9 @@ class NumpyVisionDataset:
         self,
         dataset: torch.utils.data.Dataset,
         shape: tuple[int, ...],
-        mid = 0.0,
-        ran = 1.0,
-        channel_last = False,
+        mid=0.0,
+        ran=1.0,
+        channel_last=False,
     ):
         self.dataset = dataset
         self.shape = shape
@@ -63,6 +64,28 @@ class NumpyVisionDataset:
         data = data / 255.0
         data = (data - self.mid) / self.ran
         return data
+
+    def __iter__(self) -> Iterator[np.ndarray]:
+        for index in range(len(self.dataset)):
+            yield self[index]
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+
+class NumpyVisionDataset2:
+    def __init__(
+        self,
+        data: torch.utils.data.Dataset,
+        shape: tuple[int, ...],
+    ):
+        self.data = data.numpy()
+        self.shape = shape
+
+    def __getitem__(self, index) -> np.ndarray:
+        data = self.data[index]
+        batch_shape = data.shape[:-3]
+        return data.reshape(*batch_shape, *self.shape)
 
     def __iter__(self) -> Iterator[np.ndarray]:
         for index in range(len(self.dataset)):
@@ -230,9 +253,17 @@ class CmdArgs:
     def data(self) -> Iterable[np.ndarray]:
         dataset = self.args.dataset
         if dataset is None:
-            dataset = self.args.model.stem.split("-")[0]
+            dataset, *extra = self.args.model.stem.split("-")
         if dataset.lower() == "mnist":
             testset = torchvision.datasets.MNIST(
+                ".datasets",
+                train=False,
+                download=True,
+                transform=torchvision.transforms.ToTensor(),
+            )
+            return NumpyVisionDataset(testset, shape=(1, 28, 28))
+        elif dataset.lower() == "fashion" and extra[0].lower() == "mnist":
+            testset = torchvision.datasets.FashionMNIST(
                 ".datasets",
                 train=False,
                 download=True,
@@ -247,6 +278,20 @@ class CmdArgs:
                 transform=torchvision.transforms.ToTensor(),
             )
             return NumpyVisionDataset(testset, shape=(3, 32, 32))
+        elif dataset.lower() == "gtsrb":
+            testset = torchvision.datasets.GTSRB(
+                ".datasets",
+                split="test",
+                download=True,
+                transform=torchvision.transforms.Compose(
+                    [
+                        torchvision.transforms.Resize((32, 32)),
+                        torchvision.transforms.ToTensor(),
+                    ]
+                ),
+            )
+            testdata, _ = next(iter(DataLoader(testset, batch_size=1000)))
+            return NumpyVisionDataset2(testdata, shape=(3, 32, 32))
         else:
             data, _ = load_dataset(dataset)
         return data
