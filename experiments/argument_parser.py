@@ -293,6 +293,28 @@ class CmdArgs:
             )
             testdata, _ = next(iter(DataLoader(testset, batch_size=1000)))
             return NumpyVisionDataset2(testdata, shape=(1, 28, 28))
+        elif dataset.lower() == "octmnist":
+            path = Path(".datasets/medmnist")
+            path.mkdir(parents=True, exist_ok=True)
+            testset = medmnist.OCTMNIST(
+                split="test",
+                download=True,
+                transform=torchvision.transforms.ToTensor(),
+                root=path,
+            )
+            testdata, _ = next(iter(DataLoader(testset, batch_size=1000)))
+            return NumpyVisionDataset2(testdata, shape=(1, 28, 28))
+        elif dataset.lower() == "retinamnist":
+            path = Path(".datasets/medmnist")
+            path.mkdir(parents=True, exist_ok=True)
+            testset = medmnist.RetinaMNIST(
+                split="test",
+                download=True,
+                transform=torchvision.transforms.ToTensor(),
+                root=path,
+            )
+            testdata, _ = next(iter(DataLoader(testset, batch_size=1000)))
+            return NumpyVisionDataset2(testdata, shape=(3, 28, 28))
         elif dataset.lower() == "tissuemnist":
             path = Path(".datasets/medmnist")
             path.mkdir(parents=True, exist_ok=True)

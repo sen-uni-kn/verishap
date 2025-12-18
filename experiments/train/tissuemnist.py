@@ -1,7 +1,5 @@
 # Copyright 2025 David Boetius
 # Adapted from https://docs.kidger.site/equinox/examples/mnist/
-import itertools as it
-from dataclasses import dataclass
 
 import equinox as eqx
 import jax
@@ -15,7 +13,7 @@ from optax.losses import softmax_cross_entropy_with_integer_labels as cross_entr
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from ..models import resnet18, CNN
+from ..models import CNN
 
 # ==============================================================================
 # Hyperparameters
@@ -121,7 +119,9 @@ if __name__ == "__main__":
         loss = cross_entropy(pred_y, y.squeeze()).mean()
         return loss, state
 
-    def evaluate(model: PyTree, state: PyTree, loader: DataLoader) -> tuple[float, float]:
+    def evaluate(
+        model: PyTree, state: PyTree, loader: DataLoader
+    ) -> tuple[float, float]:
         """Computes average loss and accuracy over a dataset."""
         inference_model = eqx.nn.inference_mode(model)
         loss_val = 0.0
@@ -163,7 +163,9 @@ if __name__ == "__main__":
         epoch_len = len(trainset) // BATCH_SIZE
 
         for epoch in range(epochs):
-            for i, (x_batch, y_batch) in tqdm(enumerate(iter(train_loader)), total=epoch_len):
+            for i, (x_batch, y_batch) in tqdm(
+                enumerate(iter(train_loader)), total=epoch_len
+            ):
                 x_batch, y_batch = x_batch.numpy(), y_batch.numpy()
                 model, state, opt_state, train_loss = train_step(
                     model, state, opt_state, x_batch, y_batch

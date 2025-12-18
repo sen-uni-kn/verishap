@@ -11,7 +11,7 @@ import numpy as np
 import optax
 import torchvision
 from jaxtyping import Array, Float, Int, PyTree
-from optax.losses import sigmoid_binary_cross_entropy as binary_cross_entropy
+from optax.losses import softmax_cross_entropy_with_integer_labels as cross_entropy
 from torch.utils.data import DataLoader, Dataset
 
 from ..models import CNN
@@ -20,9 +20,9 @@ from ..models import CNN
 # Hyperparameters
 # ==============================================================================
 
-BATCH_SIZE = 64
+BATCH_SIZE = 16
 LEARNING_RATE = 3e-4
-EPOCHS = 15
+EPOCHS = 200
 PRINT_EVERY = 100
 SEED = 1708
 OUT_FILE = "retinamnist-cnn.eqx"
@@ -77,8 +77,8 @@ if __name__ == "__main__":
         (3, 28, 28),
         5,
         subkey,
-        conv_layers=[{"channels": 4}, {"channels": 8}],
-        fc_in_sizes=(392, 64),
+        conv_layers=[{"channels": 4}, {"channels": 4}],
+        fc_in_sizes=(196, 64),
     )
 
     print("=" * 80)
@@ -107,8 +107,8 @@ if __name__ == "__main__":
             model, axis_name="batch", in_axes=(0, None), out_axes=(0, None)
         )
         pred_y, state = model(x, state)
-        pred_y = pred_y >= 0.0
-        acc = jnp.mean(y == pred_y)
+        pred_y = jnp.argmax(pred_y, axis=-1)
+        acc = jnp.mean(y.squeeze() == pred_y)
         return acc, state
 
     @eqx.filter_jit
@@ -127,7 +127,7 @@ if __name__ == "__main__":
             model, axis_name="batch", in_axes=(0, None), out_axes=(0, None)
         )
         pred_y, state = model(x, state)
-        loss = binary_cross_entropy(pred_y, y).mean()
+        loss = cross_entropy(pred_y, y.squeeze()).mean()
         return loss, state
 
     def evaluate(model: CNN, state: PyTree, dataset: Dataset) -> tuple[float, float]:
