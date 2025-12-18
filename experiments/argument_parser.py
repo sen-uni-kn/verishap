@@ -293,6 +293,17 @@ class CmdArgs:
             )
             testdata, _ = next(iter(DataLoader(testset, batch_size=1000)))
             return NumpyVisionDataset2(testdata, shape=(1, 28, 28))
+        elif dataset.lower() == "tissuemnist":
+            path = Path(".datasets/medmnist")
+            path.mkdir(parents=True, exist_ok=True)
+            testset = medmnist.TissueMNIST(
+                split="test",
+                download=True,
+                transform=torchvision.transforms.ToTensor(),
+                root=path,
+            )
+            testdata, _ = next(iter(DataLoader(testset, batch_size=1000)))
+            return NumpyVisionDataset2(testdata, shape=(1, 28, 28))
         elif dataset.lower() == "cifar10":
             testset = torchvision.datasets.CIFAR10(
                 ".datasets",
