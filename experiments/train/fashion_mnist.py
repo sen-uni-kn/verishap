@@ -19,7 +19,7 @@ from ..models import CNN
 # Hyperparameters
 # ==============================================================================
 
-BATCH_SIZE = 100
+BATCH_SIZE = 64
 LEARNING_RATE = 3e-4
 EPOCHS = 100
 PRINT_EVERY = 100

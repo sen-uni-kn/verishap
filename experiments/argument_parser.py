@@ -11,6 +11,7 @@ from typing import Any, Callable
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import medmnist
 import numpy as np
 import torch
 import torchvision
@@ -281,6 +282,17 @@ class CmdArgs:
                 transform=torchvision.transforms.ToTensor(),
             )
             return NumpyVisionDataset(testset, shape=(1, 28, 28))
+        elif dataset.lower() == "chestmnist":
+            path = Path(".datasets/medmnist")
+            path.mkdir(parents=True, exist_ok=True)
+            testset = medmnist.ChestMNIST(
+                split="test",
+                download=True,
+                transform=torchvision.transforms.ToTensor(),
+                root=path,
+            )
+            testdata, _ = next(iter(DataLoader(testset, batch_size=1000)))
+            return NumpyVisionDataset2(testdata, shape=(1, 28, 28))
         elif dataset.lower() == "cifar10":
             testset = torchvision.datasets.CIFAR10(
                 ".datasets",
