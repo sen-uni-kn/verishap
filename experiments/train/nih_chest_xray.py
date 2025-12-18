@@ -21,18 +21,18 @@ from ..models import CNN
 # Hyperparameters
 # ==============================================================================
 
-BATCH_SIZE = 4
-LEARNING_RATE = 1e-4
-EPOCHS = 5
+BATCH_SIZE = 16
+LEARNING_RATE = 3e-4
+EPOCHS = 50
 PRINT_EVERY = 100
 SEED = 1243
-OUT_FILE = "nih-chesta-xray-cnn.eqxparams"
+OUT_FILE = "nih-chest-xray-cnn.eqxparams"
 MODEL_CLS = partial(
     CNN,
-    (1, 32, 32),
+    (1, 100, 100),
     1,
-    conv_layers=[{"channels": 16}, {"channels": 32}],
-    fc_in_sizes=(2048, 128),
+    conv_layers=[{"channels": 16}, {"channels": 32}, {"channels": 64}, {"channels": 128}],
+    fc_in_sizes=(4608, 256),
 )
 
 
@@ -54,7 +54,7 @@ if __name__ == "__main__":
 
     transform = torchvision.transforms.Compose(
         [
-            torchvision.transforms.Resize((32, 32)),
+            torchvision.transforms.Resize((100, 100)),
             torchvision.transforms.Grayscale(num_output_channels=1),
             torchvision.transforms.ToTensor(),
         ]
@@ -93,14 +93,14 @@ if __name__ == "__main__":
         trainset,
         batch_size=BATCH_SIZE,
         shuffle=True,
-        num_workers=8,
+        num_workers=20,
         multiprocessing_context="forkserver",
     )
     train_loader2 = DataLoader(
         trainset,
         batch_size=BATCH_SIZE,
         shuffle=False,
-        num_workers=8,
+        num_workers=20,
         multiprocessing_context="forkserver",
     )
     test_loader = DataLoader(

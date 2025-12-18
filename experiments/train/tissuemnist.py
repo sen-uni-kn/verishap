@@ -11,21 +11,21 @@ import numpy as np
 import optax
 import torchvision
 from jaxtyping import Array, Float, Int, PyTree
-from optax.losses import sigmoid_binary_cross_entropy as binary_cross_entropy
+from optax.losses import softmax_cross_entropy_with_integer_labels as cross_entropy
 from torch.utils.data import DataLoader, Dataset
 
-from ..models import CNN
+from ..models import resnet18
 
 # ==============================================================================
 # Hyperparameters
 # ==============================================================================
 
-BATCH_SIZE = 64
-LEARNING_RATE = 3e-4
-EPOCHS = 15
+BATCH_SIZE = 8
+LEARNING_RATE = 1e-4
+EPOCHS = 30
 PRINT_EVERY = 100
-SEED = 1708
-OUT_FILE = "chestmnist-cnn.eqx"
+SEED = 2011
+OUT_FILE = "tissuemnist-resnet18.eqx"
 
 if __name__ == "__main__":
     key = jax.random.PRNGKey(SEED)
@@ -36,15 +36,15 @@ if __name__ == "__main__":
     # ==============================================================================
 
     print("=" * 80)
-    print("Downloading CHESTMNIST dataset...")
+    print("Downloading TissueMNIST dataset...")
 
-    trainset = medmnist.ChestMNIST(
+    trainset = medmnist.TissueMNIST(
         root=".datasets/medmnist",
         split="train",
         download=True,
         transform=torchvision.transforms.ToTensor(),
     )
-    testset = medmnist.ChestMNIST(
+    testset = medmnist.TissueMNIST(
         root=".datasets/medmnist",
         split="test",
         download=True,
@@ -52,7 +52,7 @@ if __name__ == "__main__":
     )
 
     @dataclass
-    class ChestMNISTDataset:
+    class InMemoryDataset:
         data: np.ndarray
         targets: np.ndarray
 
@@ -65,21 +65,22 @@ if __name__ == "__main__":
             return len(self.data)
 
     print("Loading datasets into memory...")
-    trainset = ChestMNISTDataset(trainset)
-    testset = ChestMNISTDataset(testset)
+    trainset = InMemoryDataset(trainset)
+    testset = InMemoryDataset(testset)
 
     # ==============================================================================
     # Model
     # ==============================================================================
 
     key, subkey = jax.random.split(key, 2)
-    model, state = eqx.nn.make_with_state(CNN)(
-        (1, 28, 28),
-        14,
-        subkey,
-        conv_layers=[{"channels": 4}, {"channels": 8}],
-        fc_in_sizes=(392, 64),
-    )
+    # model, state = eqx.nn.make_with_state(CNN)(
+    #     (1, 28, 28),
+    #     8,
+    #     subkey,
+    #     conv_layers=[{"channels": 8}, {"channels": 16}, {"channels": 32}],
+    #     fc_in_sizes=(288, 64),
+    # )
+    model, state = eqx.nn.make_with_state(resnet18)(subkey, in_channels=1, num_classes=8)
 
     print("=" * 80)
     print("Model:")
@@ -95,7 +96,7 @@ if __name__ == "__main__":
 
     @eqx.filter_jit
     def accuracy(
-        model: CNN,
+        model: PyTree,
         state: PyTree,
         x: Float[Array, "batch 1 28 28"],
         y: Int[Array, " batch t"],
@@ -107,13 +108,12 @@ if __name__ == "__main__":
             model, axis_name="batch", in_axes=(0, None), out_axes=(0, None)
         )
         pred_y, state = model(x, state)
-        pred_y = pred_y >= 0.0
-        acc = jnp.mean(y == pred_y)
+        acc = jnp.mean(y == jnp.argmax(pred_y, axis=-1))
         return acc, state
 
     @eqx.filter_jit
     def loss(
-        model: CNN,
+        model: PyTree,
         state: PyTree,
         x: Float[Array, " batch 1 28 28"],
         y: Int[Array, " batch t"],
@@ -127,10 +127,10 @@ if __name__ == "__main__":
             model, axis_name="batch", in_axes=(0, None), out_axes=(0, None)
         )
         pred_y, state = model(x, state)
-        loss = binary_cross_entropy(pred_y, y).mean()
+        loss = cross_entropy(pred_y, y.squeeze()).mean()
         return loss, state
 
-    def evaluate(model: CNN, state: PyTree, dataset: Dataset) -> tuple[float, float]:
+    def evaluate(model: PyTree, state: PyTree, dataset: Dataset) -> tuple[float, float]:
         """Computes average loss and accuracy over a dataset."""
         inference_model = eqx.nn.inference_mode(model)
         x, y = dataset.data, dataset.targets
@@ -139,19 +139,19 @@ if __name__ == "__main__":
         return loss_val, acc_val
 
     def train(
-        model: CNN,
+        model: PyTree,
         state: PyTree,
         trainset: Dataset,
         testset: Dataset,
         optim: optax.GradientTransformation,
         epochs: int,
         print_every: int,
-    ) -> CNN:
+    ) -> PyTree:
         opt_state = optim.init(eqx.filter(model, eqx.is_array))
 
         @eqx.filter_jit
         def train_step(
-            model: CNN,
+            model: PyTree,
             state: PyTree,
             opt_state: PyTree,
             x: Float[Array, "batch 1 28 28"],
@@ -196,4 +196,4 @@ if __name__ == "__main__":
     optim = optax.adamw(LEARNING_RATE)
     model, state = train(model, state, trainset, testset, optim, EPOCHS, PRINT_EVERY)
 
-    CNN.save(model, state, OUT_FILE)
+    model.save(model, state, OUT_FILE)

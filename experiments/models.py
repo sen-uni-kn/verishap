@@ -2,7 +2,7 @@
 import io
 from collections.abc import Sequence
 from functools import partial
-from typing import Literal
+from typing import Literal, Callable
 
 import equinox as eqx
 import jax
@@ -489,6 +489,8 @@ class ResNet(nn.StatefulLayer):
         layers: tuple[int, ...] = (2, 2, 2, 2),
         groups: int = 1,
         width_per_group: int = 64,
+        in_channels: int = 3,
+        num_classes: int = 10,
     ) -> None:
         super().__init__()
         norm_layer = BatchNorm
@@ -501,7 +503,7 @@ class ResNet(nn.StatefulLayer):
         self.groups = groups
         self.base_width = width_per_group
         self.conv1 = nn.Conv2d(
-            3,
+            in_channels,
             self.inplanes,
             kernel_size=7,
             stride=2,
@@ -516,7 +518,7 @@ class ResNet(nn.StatefulLayer):
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2, key=keys[3])
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2, key=keys[4])
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(512 * block.expansion, 1, key=keys[5])
+        self.fc = nn.Linear(512 * block.expansion, num_classes, key=keys[5])
 
         # for m in self.modules():
         #     if isinstance(m, nn.Conv2d):
@@ -596,9 +598,9 @@ class ResNet(nn.StatefulLayer):
         x = self.avgpool(x)
         x = jnp.ravel(x)
         x = self.fc(x)
-        x = x.squeeze(axis=-1)
 
         return x, state
 
-def resnet18(key: jax.random.PRNGKey) -> ResNet:
-    return ResNet(key, block=BasicBlock, layers=(2, 2, 2, 2))
+def resnet18(key: jax.random.PRNGKey, in_channels: int = 3, num_classes: int = 1) -> ResNet:
+    return ResNet(key, block=BasicBlock, layers=(2, 2, 2, 2), in_channels=in_channels, num_classes=num_classes)
+
