@@ -96,7 +96,8 @@ if __name__ == "__main__":
             model, axis_name="batch", in_axes=(0, None), out_axes=(0, None)
         )
         pred_y, state = model(x, state)
-        acc = jnp.mean(y == jnp.argmax(pred_y, axis=-1))
+        pred_y = jnp.argmax(pred_y, axis=-1)
+        acc = jnp.mean(y.squeeze() == pred_y)
         return acc, state
 
     @eqx.filter_jit
