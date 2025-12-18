@@ -2,7 +2,7 @@
 import io
 from collections.abc import Sequence
 from functools import partial
-from typing import Literal, Callable
+from typing import Callable, Literal
 
 import equinox as eqx
 import jax
@@ -296,14 +296,13 @@ class CNN(eqx.Module):
 # Adapted from https://github.com/pytorch/vision/blob/main/torchvision/models/resnet.py
 
 
-
 class BatchNorm(nn.StatefulLayer):
     bn: nn.BatchNorm
 
     def __init__(self, planes: int):
         self.bn = nn.BatchNorm(planes, axis_name="batch", mode="batch")
 
-    def __call__(self, x: Array, state: PyTree, key = None) -> tuple[Array, PyTree]:
+    def __call__(self, x: Array, state: PyTree, key=None) -> tuple[Array, PyTree]:
         return self.bn(x, state)
 
 
@@ -380,7 +379,7 @@ class BasicBlock(nn.StatefulLayer):
         self.downsample = downsample
         self.stride = stride
 
-    def __call__(self, x: Array, state: PyTree, key = None) -> tuple[Array, PyTree]:
+    def __call__(self, x: Array, state: PyTree, key=None) -> tuple[Array, PyTree]:
         identity = x
 
         out = self.conv1(x)
@@ -443,7 +442,7 @@ class Bottleneck(nn.StatefulLayer):
         self.downsample = downsample
         self.stride = stride
 
-    def __call__(self, x: Array, state: PyTree, key = None) -> tuple[Array, PyTree]:
+    def __call__(self, x: Array, state: PyTree, key=None) -> tuple[Array, PyTree]:
         identity = x
 
         out = self.conv1(x)
@@ -468,6 +467,12 @@ class Bottleneck(nn.StatefulLayer):
 
 class ResNet(nn.StatefulLayer):
     _norm_layer: eqx.Module
+    in_channels: int
+    num_classes: int
+    layer1_size: int
+    layer2_size: int
+    layer3_size: int
+    layer4_size: int
     inplanes: int
     dilation: int
     groups: int
@@ -493,6 +498,8 @@ class ResNet(nn.StatefulLayer):
         num_classes: int = 10,
     ) -> None:
         super().__init__()
+        self.in_channels = in_channels
+        self.num_classes = num_classes
         norm_layer = BatchNorm
         self._norm_layer = norm_layer
 
@@ -583,7 +590,7 @@ class ResNet(nn.StatefulLayer):
         return nn.Sequential(layers)
 
     def __call__(
-        self, x: Float[Array, " c h w"], state: PyTree, key = None
+        self, x: Float[Array, " c h w"], state: PyTree, key=None
     ) -> tuple[Float[Array, ""], PyTree]:
         x = self.conv1(x)
         x, state = self.bn1(x, state)
@@ -601,6 +608,60 @@ class ResNet(nn.StatefulLayer):
 
         return x, state
 
-def resnet18(key: jax.random.PRNGKey, in_channels: int = 3, num_classes: int = 1) -> ResNet:
-    return ResNet(key, block=BasicBlock, layers=(2, 2, 2, 2), in_channels=in_channels, num_classes=num_classes)
+    @classmethod
+    def save(
+        cls, model: "ResNet", state: PyTree, file: str, extra_info: dict | None = None
+    ):
+        if extra_info is None:
+            extra_info = {}
+        info_dict = {
+            "in_channels": model.in_channels,
+            "num_classes": model.num_classes,
+            "layer1_size": model.layer1_size,
+            "layer2_size": model.layer2_size,
+            "layer3_size": model.layer3_size,
+            "layer4_size": model.layer4_size,
+        } | extra_info
+        with open(file, "wb") as f:
+            yaml_str = io.StringIO()
+            yaml.YAML().dump(info_dict, yaml_str)
+            f.write(yaml_str.getvalue().encode("utf-8"))
+            f.write(b"\n---\n")
+            eqx.tree_serialise_leaves(f, (model, state))
 
+    @classmethod
+    def load(cls, file: str) -> tuple["ResNet", PyTree]:
+        with open(file, "rb") as f:
+            yaml_lines = []
+            while True:
+                line = f.readline().decode("utf-8")
+                if line.startswith("---"):
+                    break
+                yaml_lines.append(line)
+            info_dict = yaml.YAML().load(io.StringIO("\n".join(yaml_lines)))
+            layers = (
+                info_dict["layer1_size"],
+                info_dict["layer2_size"],
+                info_dict["layer3_size"],
+                info_dict["layer4_size"],
+            )
+            model, state = eqx.nn.make_with_state(cls)(
+                jax.random.PRNGKey(0),
+                layers=layers,
+                in_channels=info_dict["in_channels"],
+                num_classes=info_dict["num_classes"],
+            )
+            model, state = eqx.tree_deserialise_leaves(f, (model, state))
+            return model, state
+
+
+def resnet18(
+    key: jax.random.PRNGKey, in_channels: int = 3, num_classes: int = 1
+) -> ResNet:
+    return ResNet(
+        key,
+        block=BasicBlock,
+        layers=(2, 2, 2, 2),
+        in_channels=in_channels,
+        num_classes=num_classes,
+    )

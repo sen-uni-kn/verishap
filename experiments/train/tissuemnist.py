@@ -51,23 +51,6 @@ if __name__ == "__main__":
         transform=torchvision.transforms.ToTensor(),
     )
 
-    @dataclass
-    class InMemoryDataset:
-        data: np.ndarray
-        targets: np.ndarray
-
-        def __init__(self, dataset: Dataset):
-            data, targets = next(iter(DataLoader(dataset, batch_size=len(dataset))))
-            self.data = data.numpy()
-            self.targets = targets.numpy()
-
-        def __len__(self):
-            return len(self.data)
-
-    print("Loading datasets into memory...")
-    trainset = InMemoryDataset(trainset)
-    testset = InMemoryDataset(testset)
-
     # ==============================================================================
     # Model
     # ==============================================================================
@@ -80,7 +63,9 @@ if __name__ == "__main__":
     #     conv_layers=[{"channels": 8}, {"channels": 16}, {"channels": 32}],
     #     fc_in_sizes=(288, 64),
     # )
-    model, state = eqx.nn.make_with_state(resnet18)(subkey, in_channels=1, num_classes=8)
+    model, state = eqx.nn.make_with_state(resnet18)(
+        subkey, in_channels=1, num_classes=8
+    )
 
     print("=" * 80)
     print("Model:")
@@ -92,7 +77,10 @@ if __name__ == "__main__":
 
     print("=" * 80)
     print("Training...")
-    # MNIST fits into memory, so we don't use data loaders.
+
+    train_loader = DataLoader(trainset, batch_size=BATCH_SIZE, shuffle=True)
+    train_loader2 = DataLoader(trainset, batch_size=10 * BATCH_SIZE, shuffle=True)
+    test_loader = DataLoader(testset, batch_size=10 * BATCH_SIZE, shuffle=False)
 
     @eqx.filter_jit
     def accuracy(
@@ -130,13 +118,16 @@ if __name__ == "__main__":
         loss = cross_entropy(pred_y, y.squeeze()).mean()
         return loss, state
 
-    def evaluate(model: PyTree, state: PyTree, dataset: Dataset) -> tuple[float, float]:
+    def evaluate(model: PyTree, state: PyTree, loader: DataLoader) -> tuple[float, float]:
         """Computes average loss and accuracy over a dataset."""
         inference_model = eqx.nn.inference_mode(model)
-        x, y = dataset.data, dataset.targets
-        loss_val, _ = loss(inference_model, state, x, y)
-        acc_val, _ = accuracy(inference_model, state, x, y)
-        return loss_val, acc_val
+        loss_val = 0.0
+        acc_val = 0.0
+        for x, y in loader:
+            x, y = x.numpy(), y.numpy()
+            loss_val += loss(inference_model, state, x, y)[0]
+            acc_val += accuracy(inference_model, state, x, y)[0]
+        return loss_val / len(loader), acc_val / len(loader)
 
     def train(
         model: PyTree,
@@ -166,23 +157,18 @@ if __name__ == "__main__":
             model = eqx.apply_updates(model, updates)
             return model, state, opt_state, loss_value
 
-        x, y = trainset.data, trainset.targets
         epoch_len = len(trainset) // BATCH_SIZE
 
         for epoch in range(epochs):
-            perm = np.random.permutation(len(trainset))
-
-            for i, train_idx in enumerate(it.batched(perm, BATCH_SIZE)):
-                train_idx = np.array(train_idx)
-                x_batch = x[train_idx]
-                y_batch = y[train_idx]
+            for i, (x_batch, y_batch) in enumerate(iter(train_loader)):
+                x_batch, y_batch = x_batch.numpy(), y_batch.numpy()
                 model, state, opt_state, train_loss = train_step(
                     model, state, opt_state, x_batch, y_batch
                 )
 
                 if (i % print_every) == 0 or (i == epoch_len - 1):
-                    train_loss, train_accuracy = evaluate(model, state, trainset)
-                    test_loss, test_accuracy = evaluate(model, state, testset)
+                    train_loss, train_accuracy = evaluate(model, state, train_loader2)
+                    test_loss, test_accuracy = evaluate(model, state, test_loader)
                     progress = (i + 1) / epoch_len
                     print(
                         f"[{epoch + 1}/{epochs} {progress:4.0%}] "
@@ -196,4 +182,4 @@ if __name__ == "__main__":
     optim = optax.adamw(LEARNING_RATE)
     model, state = train(model, state, trainset, testset, optim, EPOCHS, PRINT_EVERY)
 
-    model.save(model, state, OUT_FILE)
+    model.save(state, OUT_FILE)
