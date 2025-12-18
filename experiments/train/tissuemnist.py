@@ -13,6 +13,7 @@ import torchvision
 from jaxtyping import Array, Float, Int, PyTree
 from optax.losses import softmax_cross_entropy_with_integer_labels as cross_entropy
 from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
 from ..models import resnet18, CNN
 
@@ -20,7 +21,7 @@ from ..models import resnet18, CNN
 # Hyperparameters
 # ==============================================================================
 
-BATCH_SIZE = 128
+BATCH_SIZE = 64
 LEARNING_RATE = 0.01
 MOMENTUM = 0.9
 EPOCHS = 20
@@ -125,7 +126,7 @@ if __name__ == "__main__":
         inference_model = eqx.nn.inference_mode(model)
         loss_val = 0.0
         acc_val = 0.0
-        for x, y in loader:
+        for x, y in tqdm(loader):
             x, y = x.numpy(), y.numpy()
             loss_val += loss(inference_model, state, x, y)[0]
             acc_val += accuracy(inference_model, state, x, y)[0]
@@ -162,7 +163,7 @@ if __name__ == "__main__":
         epoch_len = len(trainset) // BATCH_SIZE
 
         for epoch in range(epochs):
-            for i, (x_batch, y_batch) in enumerate(iter(train_loader)):
+            for i, (x_batch, y_batch) in tqdm(enumerate(iter(train_loader)), total=epoch_len):
                 x_batch, y_batch = x_batch.numpy(), y_batch.numpy()
                 model, state, opt_state, train_loss = train_step(
                     model, state, opt_state, x_batch, y_batch
