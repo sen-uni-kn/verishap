@@ -1,74 +1,208 @@
 # Copyright 2025 David Boetius
-import hashlib
-import urllib.request
-from pathlib import Path
+# Adapted from https://docs.kidger.site/equinox/examples/mnist/
+from functools import partial
 
-# Install dependencies as needed:
-# pip install kagglehub[hf-datasets]
-import kagglehub
-from kagglehub import KaggleDatasetAdapter
+import equinox as eqx
+import jax
+import jax.numpy as jnp
+import numpy as np
+import optax
+import torch
+import torchvision
+from jaxtyping import Array, Float, Int, PyTree
+from optax.losses import sigmoid_binary_cross_entropy as binary_cross_entropy
+from torch.utils.data import DataLoader
+from tqdm import tqdm
 
-# Set the path to the file you'd like to load
-file_path = ""
+from ..datasets import NIHChestXrayDataset
+from ..models import CNN
 
-# Load the latest version
-hf_dataset = kagglehub.load_dataset(
-  KaggleDatasetAdapter.HUGGING_FACE,
-  "nih-chest-xrays/data",
-  file_path,
-  # Provide any additional arguments like 
-  # sql_query, hf_kwargs, or pandas_kwargs. See 
-  # the documenation for more information:
-  # https://github.com/Kaggle/kagglehub/blob/main/README.md#kaggledatasetadapterhugging_face
+# ==============================================================================
+# Hyperparameters
+# ==============================================================================
+
+BATCH_SIZE = 4
+LEARNING_RATE = 1e-4
+EPOCHS = 5
+PRINT_EVERY = 100
+SEED = 1243
+OUT_FILE = "nih-chesta-xray-cnn.eqxparams"
+MODEL_CLS = partial(
+    CNN,
+    (1, 32, 32),
+    1,
+    conv_layers=[{"channels": 16}, {"channels": 32}],
+    fc_in_sizes=(2048, 128),
 )
 
-print("Hugging Face Dataset:", hf_dataset)
+
+# Turn multi-class labels into finding/no-finding binary labels.
+def target_transform(x: torch.Tensor) -> torch.Tensor:
+    return (x[..., :-1] > 0.0).any(dim=-1)
 
 
-class NIHChestXrayDataset:
-    links = (
-        "https://nihcc.box.com/shared/static/vfk49d74nhbxq3nqjg0900w5nvkorp5c.gz",
-        "https://nihcc.box.com/shared/static/i28rlmbvmfjbl8p2n3ril0pptcmcu9d1.gz",
-        "https://nihcc.box.com/shared/static/f1t00wrtdk94satdfb9olcolqx20z2jp.gz",
-        "https://nihcc.box.com/shared/static/0aowwzs5lhjrceb3qp67ahp0rd1l1etg.gz",
-        "https://nihcc.box.com/shared/static/v5e3goj22zr6h8tzualxfsqlqaygfbsn.gz",
-        "https://nihcc.box.com/shared/static/asi7ikud9jwnkrnkj99jnpfkjdes7l6l.gz",
-        "https://nihcc.box.com/shared/static/jn1b4mw4n6lnh74ovmcjb8y48h8xj07n.gz",
-        "https://nihcc.box.com/shared/static/tvpxmn7qyrgl0w8wfh9kqfjskv6nmm1j.gz",
-        "https://nihcc.box.com/shared/static/upyy3ml7qdumlgk2rfcvlb9k6gvqq2pj.gz",
-        "https://nihcc.box.com/shared/static/l6nilvfa9cg3s28tqv1qc1olm3gnz54p.gz",
-        "https://nihcc.box.com/shared/static/hhq8fkdgvcari67vfhs7ppg2w6ni4jze.gz",
-        "https://nihcc.box.com/shared/static/ioqwiy20ihqwyr8pf4c24eazhh281pbu.gz",
+if __name__ == "__main__":
+    key = jax.random.PRNGKey(SEED)
+    np.random.seed(SEED + 1)
+
+    # ==============================================================================
+    # Data Loading
+    # ==============================================================================
+
+    print("=" * 80)
+    print("Obtaining NIH Chest X-ray dataset...")
+
+    transform = torchvision.transforms.Compose(
+        [
+            torchvision.transforms.Resize((32, 32)),
+            torchvision.transforms.Grayscale(num_output_channels=1),
+            torchvision.transforms.ToTensor(),
+        ]
     )
-    md5_checksums = {
-        "images_001.tar.gz": "fe8ed0a6961412fddcbb3603c11b3698",
-        "images_002.tar.gz": "ab07a2d7cbe6f65ddd97b4ed7bde10bf",
-        "images_003.tar.gz": "2301d03bde4c246388bad3876965d574",
-        "images_004.tar.gz": "9f1b7f5aae01b13f4bc8e2c44a4b8ef6",
-        "images_005.tar.gz": "1861f3cd0ef7734df8104f2b0309023b",
-        "images_006.tar.gz": "456b53a8b351afd92a35bc41444c58c8",
-        "images_007.tar.gz": "1075121ea20a137b87f290d6a4a5965e",
-        "images_008.tar.gz": "b61f34cec3aa69f295fbb593cbd9d443",
-        "images_009.tar.gz": "442a3caa61ae9b64e61c561294d1e183",
-        "images_010.tar.gz": "09ec81c4c31e32858ad8cf965c494b74",
-        "images_011.tar.gz": "499aefc67207a5a97692424cf5dbeed5",
-        "images_012.tar.gz": "dc9fda1757c2de0032b63347a7d2895c",
-    }
 
-    def __init__(self, root, train=True, download=False):
-        self.dataset_dir = Path(root) / "nih_chest_xray"
-        if download:
-            self.download(self.dataset_dir)
+    trainset = NIHChestXrayDataset(
+        split="train",
+        transform=transform,
+        target_transform=target_transform,
+    )
+    testset = NIHChestXrayDataset(
+        split="test",
+        transform=transform,
+        target_transform=target_transform,
+    )
 
-    @classmethod
-    def download(cls, dataset_dir: Path):
-        print("Downloading NIH Chest X-ray dataset...")
-        dataset_dir.mkdir(parents=True, exist_ok=True)
-        for idx, link in enumerate(cls.links):
-            fn = dataset_dir / f"images_{idx + 1:03d}.tar.gz"
-            print("downloading" + fn + "...")
-            urllib.request.urlretrieve(link, fn)
-            if cls.md5_checksums[fn] != hashlib.md5(open(fn, "rb").read()).hexdigest():
-                raise ValueError(f"Checksum mismatch for {fn}")
+    # ==============================================================================
+    # Model
+    # ==============================================================================
 
-        print("Download complete.")
+    key, subkey = jax.random.split(key, 2)
+    model, state = eqx.nn.make_with_state(MODEL_CLS)(subkey)
+
+    print("=" * 80)
+    print("Model:")
+    print(model)
+
+    # ==============================================================================
+    # Training
+    # ==============================================================================
+
+    print("=" * 80)
+    print("Training...")
+
+    train_loader = DataLoader(
+        trainset,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        num_workers=8,
+        multiprocessing_context="forkserver",
+    )
+    train_loader2 = DataLoader(
+        trainset,
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        num_workers=8,
+        multiprocessing_context="forkserver",
+    )
+    test_loader = DataLoader(
+        testset,
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        num_workers=8,
+        multiprocessing_context="forkserver",
+    )
+
+    @eqx.filter_jit
+    def loss(
+        model: MODEL_CLS,
+        state: PyTree,
+        x: Float[Array, "batch 1 32 32"],
+        y: Int[Array, " batch"],
+    ) -> tuple[Float[Array, ""], PyTree]:
+        model = jax.vmap(
+            model, axis_name="batch", in_axes=(0, None), out_axes=(0, None)
+        )
+        pred_y, state = model(x, state)
+        loss = binary_cross_entropy(pred_y, y).mean()
+        accuracy = (y == (pred_y >= 0.0)).mean()
+        return loss, (accuracy, state)
+
+    def evaluate(
+        model: MODEL_CLS, state: PyTree, loader: DataLoader
+    ) -> tuple[float, float]:
+        """Computes average loss and accuracy over a dataset."""
+        inference_model = eqx.nn.inference_mode(model)
+        loss_val = 0.0
+        acc_val = 0.0
+        for x, y in tqdm(loader):
+            x, y = x.numpy(), y.numpy()
+            loss_, (acc, state) = loss(inference_model, state, x, y)
+            loss_val += loss_
+            acc_val += acc
+        return loss_val / len(loader), acc_val / len(loader)
+
+    def train(
+        model: MODEL_CLS,
+        state: PyTree,
+        train_loader: DataLoader,
+        test_loader: DataLoader,
+        optim: optax.GradientTransformation,
+        epochs: int,
+        print_every: int,
+    ) -> MODEL_CLS:
+        opt_state = optim.init(eqx.filter(model, eqx.is_array))
+
+        @eqx.filter_jit
+        def train_step(
+            model: MODEL_CLS,
+            state: PyTree,
+            opt_state: PyTree,
+            x: Float[Array, "batch 1 32 32"],
+            y: Int[Array, " batch"],
+        ):
+            (loss_value, (accuracy, state)), grads = eqx.filter_value_and_grad(
+                loss, has_aux=True
+            )(model, state, x, y)
+            updates, opt_state = optim.update(
+                grads, opt_state, eqx.filter(model, eqx.is_array)
+            )
+            model = eqx.apply_updates(model, updates)
+            return model, state, opt_state, loss_value, accuracy
+
+        epoch_len = len(train_loader)
+
+        losses, accuracies = [], []
+        for epoch in range(epochs):
+            for i, (x_batch, y_batch) in enumerate(iter(train_loader)):
+                x_batch, y_batch = x_batch.numpy(), y_batch.numpy()
+                model, state, opt_state, train_loss, train_accuracy = train_step(
+                    model, state, opt_state, x_batch, y_batch
+                )
+                losses.append(train_loss)
+                accuracies.append(train_accuracy)
+
+                if (i % print_every) == 0:
+                    loss_ = np.mean(losses)
+                    accuracy_ = np.mean(accuracies)
+                    progress = (i + 1) / epoch_len
+                    print(
+                        f"[{epoch + 1}/{epochs} {progress:4.0%}] "
+                        f"avg loss: {loss_.item():.6f}, "
+                        f"avg accuracy: {accuracy_.item():.2%}"
+                    )
+                    losses, accuracies = [], []
+
+            test_loss, test_accuracy = evaluate(model, state, test_loader)
+            progress = (i + 1) / epoch_len
+            print(
+                f"[{epoch + 1}/{epochs} {progress:4.0%}] "
+                f"test loss: {test_loss.item():.6f}, "
+                f"test accuracy: {test_accuracy.item():.2%}"
+            )
+        return model, state
+
+    optim = optax.adamw(LEARNING_RATE)
+    model, state = train(
+        model, state, train_loader, test_loader, optim, EPOCHS, PRINT_EVERY
+    )
+
+    type(model).save(model, state, OUT_FILE)

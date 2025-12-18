@@ -1,10 +1,15 @@
 # Copyright 2025 David Boetius
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Literal
 
+import kagglehub
 import numpy as np
 import pandas as pd
 import shap.datasets
+import torch
+from PIL import Image
+from torch.utils.data import Dataset
 from ucimlrepo import fetch_ucirepo
 
 
@@ -25,8 +30,6 @@ def load_dataset(dataset: str) -> tuple[np.ndarray, np.ndarray]:
     else:
         raise ValueError(f"Dataset {dataset} not found.")
     return data, targets
-
-
 
 
 def corrgroups(
@@ -195,7 +198,9 @@ def save_dataset(dataset_name: str):
     return decorator
 
 
-def get_uci_dataset(id: int, targets: Literal["binary", "multiclass", "regression", "raw"] = "binary") -> tuple[np.ndarray, np.ndarray]:
+def get_uci_dataset(
+    id: int, targets: Literal["binary", "multiclass", "regression", "raw"] = "binary"
+) -> tuple[np.ndarray, np.ndarray]:
     """Obtain a dataset from the UCI ML Repository."""
     dataset = fetch_ucirepo(id=id)
 
@@ -425,9 +430,11 @@ def lung_cancer() -> tuple[np.ndarray, np.ndarray]:
     y = y.to_numpy().astype(np.int32).squeeze()
     return x, y
 
+
 def spambase() -> tuple[np.ndarray, np.ndarray]:
     """Spambase Dataset from the UCI ML Repository."""
     return get_uci_dataset(id=94, targets="binary")
+
 
 @save_dataset("uci_online_news_popularity")
 def online_news() -> tuple[np.ndarray, np.ndarray]:
@@ -460,3 +467,203 @@ def rt_iot() -> tuple[np.ndarray, np.ndarray]:
 def bankruptcy() -> tuple[np.ndarray, np.ndarray]:
     """Taiwanese Bankruptcy Dataset from the UCI ML Repository."""
     return get_uci_dataset(id=572, targets="binary")
+
+
+# ==============================================================================
+# NIH Chest X-ray Dataset
+# ==============================================================================
+
+
+class NIHChestXrayDataset(Dataset):
+    """PyTorch dataset for NIH Chest X-ray using data downloaded via kagglehub.
+
+    Args:
+        split: One of ``"train"``, ``"val"``, ``"trainval"``, ``"test"``, or
+            ``"all"``. Validation is carved deterministically from the official
+            train/val list using ``val_fraction``.
+        transform: Optional torchvision-style transform applied to the PIL image.
+        target_transform: Optional transform applied to the multi-hot label tensor.
+        val_fraction: Fraction of the official train/val split reserved for
+            validation when ``split`` is ``"train"`` or ``"val"``.
+        seed: Deterministic seed used when partitioning the train/val list.
+        download: If ``True`` and ``root`` is not provided, resolve the dataset
+            via ``kagglehub.dataset_download`` (may download if not cached).
+    """
+
+    NIH_CHEST_XRAY_LABELS: Sequence[str] = (
+        "Atelectasis",
+        "Cardiomegaly",
+        "Consolidation",
+        "Edema",
+        "Effusion",
+        "Emphysema",
+        "Fibrosis",
+        "Hernia",
+        "Infiltration",
+        "Mass",
+        "Nodule",
+        "Pleural_Thickening",
+        "Pneumonia",
+        "Pneumothorax",
+        "No Finding",
+    )
+
+    def __init__(
+        self,
+        split: str = "train",
+        transform=None,
+        target_transform=None,
+        val_fraction: float = 0.1,
+        seed: int = 0,
+    ) -> None:
+        super().__init__()
+        self.root = Path(kagglehub.dataset_download("nih-chest-xrays/data"))
+        self.transform = transform
+        self.target_transform = target_transform
+
+        self.metadata = self._load_metadata()
+        split_names = self._resolve_split(split, val_fraction, seed)
+        self.samples = self.metadata[
+            self.metadata["Image Index"].isin(split_names)
+        ].reset_index(drop=True)
+
+        self._image_lookup = self._index_images(self.samples["Image Index"])
+        if self.samples.empty:
+            raise RuntimeError(
+                "No samples found for split "
+                f"{split!r}. Check that the dataset is extracted correctly."
+            )
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, idx: int):
+        row = self.samples.iloc[idx]
+        image_path = self._image_lookup.get(row["Image Index"])
+        if image_path is None:
+            raise FileNotFoundError(
+                f"Could not find image {row['Image Index']} on disk"
+            )
+
+        image = Image.open(image_path).convert("RGB")
+        target = self._encode_labels(row["Finding Labels"])
+
+        if self.transform is not None:
+            image = self.transform(image)
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+
+        return image, target
+
+    def _load_metadata(self) -> pd.DataFrame:
+        candidates = [
+            self.root / "Data_Entry_2017.csv",
+            self.root / "Data_Entry_2017_v2020.csv",
+        ]
+        csv_path = next((p for p in candidates if p.exists()), None)
+        if csv_path is None:
+            raise FileNotFoundError(
+                f"Could not find dataset metadata CSV in {self.root}. "
+                "Ensure kagglehub.dataset_download('nih-chest-xrays/data') "
+                "has been extracted."
+            )
+        metadata = pd.read_csv(csv_path)
+        expected_columns = {"Image Index", "Finding Labels"}
+        if not expected_columns.issubset(metadata.columns):
+            raise ValueError(
+                f"Metadata CSV missing expected columns {expected_columns}. "
+                f"Found columns: {set(metadata.columns)}"
+            )
+        return metadata[["Image Index", "Finding Labels"]]
+
+    def _resolve_split(self, split: str, val_fraction: float, seed: int) -> set[str]:
+        split = split.lower()
+        if split == "all":
+            return set(self.metadata["Image Index"])
+
+        if split == "test":
+            test_file = self.root / "test_list.txt"
+            return self._load_split_file(test_file)
+
+        train_val_file = self.root / "train_val_list.txt"
+        train_val_names = self._load_split_file(train_val_file)
+        if split == "trainval":
+            return train_val_names
+
+        # Deterministic partition of the official train/val list.
+        rng = np.random.default_rng(seed)
+        train_val_names = list(train_val_names)
+        permuted = [train_val_names[i] for i in rng.permutation(len(train_val_names))]
+        split_idx = int(len(permuted) * (1 - val_fraction))
+        train_names = set(permuted[:split_idx])
+        val_names = set(permuted[split_idx:])
+
+        if split == "train":
+            return train_names
+        elif split == "val":
+            return val_names
+
+        raise ValueError(f"Unknown split {split!r}.")
+
+    def _index_images(self, requested_files: Iterable[str]) -> dict[str, Path]:
+        """Index image paths for the requested filenames only."""
+        requested = set(requested_files)
+        image_roots = self._find_image_roots(self.root)
+        if not image_roots:
+            raise FileNotFoundError(
+                f"Could not find any image folders under {self.root}. "
+                "The dataset should contain directories like images_001/images."
+            )
+
+        lookup: dict[str, Path] = {}
+        for root in image_roots:
+            for ext in ("*.png", "*.jpg", "*.jpeg"):
+                for img_path in root.glob(ext):
+                    name = img_path.name
+                    if name in requested:
+                        lookup[name] = img_path
+                        if len(lookup) == len(requested):
+                            return lookup
+        return lookup
+
+    def _encode_labels(self, label_string: str) -> torch.Tensor:
+        target = torch.zeros(len(self.NIH_CHEST_XRAY_LABELS), dtype=torch.float32)
+        labels = [label.strip() for label in label_string.split("|")]
+        if labels == [""]:
+            return target
+        for label in labels:
+            try:
+                idx = self.NIH_CHEST_XRAY_LABELS.index(label)
+            except ValueError as ex:
+                raise ValueError(
+                    f"Unknown label '{label}' in NIH ChestX-ray metadata"
+                ) from ex
+            target[idx] = 1.0
+        return target
+
+    @staticmethod
+    def _find_image_roots(root: Path) -> list[Path]:
+        """Locate folders that contain the actual PNG/JPEG files."""
+        candidates = [path for path in root.glob("**/images") if path.is_dir()]
+        # Some archives extract directly to images_001, images_002, ...
+        candidates.extend([path for path in root.glob("images_*") if path.is_dir()])
+        candidates.extend([root / "images"] if (root / "images").is_dir() else [])
+        # Deduplicate while keeping stable order.
+        seen = set()
+        unique: list[Path] = []
+        for path in candidates:
+            if path not in seen:
+                unique.append(path)
+                seen.add(path)
+        return unique
+
+    @staticmethod
+    def _load_split_file(path: Path) -> set[str]:
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Expected split file {path} not found. "
+                "Please ensure the dataset archives are extracted."
+            )
+        with path.open("r") as f:
+            names = {line.strip() for line in f if line.strip()}
+        return names
