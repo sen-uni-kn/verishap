@@ -26,7 +26,7 @@ from shap_bounds import (
 from shap_bounds.logger import Logger
 
 from . import shaplib
-from .datasets import load_dataset
+from .datasets import NIHChestXrayDataset, load_dataset
 from .leverageshap import leverage_shap
 from .models import CNN, MLP
 
@@ -144,7 +144,7 @@ class CmdArgs:
         )
         self.parser.add_argument(
             "--output-feature",
-            type=int,
+            type=str,
             default=0,
             help="The index of the output feature to explain.",
         )
@@ -250,6 +250,13 @@ class CmdArgs:
         return {key: str(value) for key, value in vars(self.args).items()}
 
     @property
+    def output_feature(self) -> int | None:
+        if self.args.output_feature == "None":
+            return None
+        else:
+            return int(self.args.output_feature)
+
+    @property
     def data(self) -> Iterable[np.ndarray]:
         dataset = self.args.dataset
         if dataset is None:
@@ -262,7 +269,11 @@ class CmdArgs:
                 transform=torchvision.transforms.ToTensor(),
             )
             return NumpyVisionDataset(testset, shape=(1, 28, 28))
-        elif dataset.lower() == "fashion" and extra[0].lower() == "mnist":
+        elif (
+            dataset.lower() == "fashion"
+            and len(extra) >= 1
+            and extra[0].lower() == "mnist"
+        ):
             testset = torchvision.datasets.FashionMNIST(
                 ".datasets",
                 train=False,
@@ -292,6 +303,25 @@ class CmdArgs:
             )
             testdata, _ = next(iter(DataLoader(testset, batch_size=1000)))
             return NumpyVisionDataset2(testdata, shape=(3, 32, 32))
+        elif (
+            dataset.lower() == "nih"
+            and len(extra) >= 2
+            and extra[0].lower() == "chest"
+            and extra[1].lower() == "xray"
+        ):
+            transform = torchvision.transforms.Compose(
+                [
+                    torchvision.transforms.Resize((32, 32)),
+                    torchvision.transforms.Grayscale(num_output_channels=1),
+                    torchvision.transforms.ToTensor(),
+                ]
+            )
+            testset = NIHChestXrayDataset(
+                split="test",
+                transform=transform,
+            )
+            testdata, _ = next(iter(DataLoader(testset, batch_size=100)))
+            return NumpyVisionDataset2(testdata, shape=(1, 32, 32))
         else:
             data, _ = load_dataset(dataset)
         return data

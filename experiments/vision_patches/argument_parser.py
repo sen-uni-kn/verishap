@@ -43,18 +43,22 @@ class VisionPatchesCmdArgs(CmdArgs):
             return f"superfeature-{self.args.shap_variant}"
 
     @property
-    def num_patches(self) -> tuple[tuple[int, int], int]:
+    def num_patches(self) -> tuple[tuple[int, int, int], int]:
         img_shape = self.img_shape
+        channels = img_shape[0]
         num_patches = self.args.num_patches
         try:
             num_patches = int(num_patches)
-            num_patches = (num_patches, num_patches)
+            # separate all channels
+            num_patches = (channels, num_patches, num_patches)
         except ValueError:
             num_patches = tuple(int(x) for x in num_patches.split(","))
-        assert num_patches[0] <= img_shape[1]
-        assert num_patches[1] <= img_shape[2]
-        total_patches = num_patches[0] * num_patches[1]
-        num_patches = (1, *num_patches)
+            if len(num_patches) == 2:
+                num_patches = (channels, *num_patches)
+        assert num_patches[0] <= img_shape[0]
+        assert num_patches[1] <= img_shape[1]
+        assert num_patches[2] <= img_shape[2]
+        total_patches = num_patches[0] * num_patches[1] * num_patches[2]
         return num_patches, total_patches
 
     @property
