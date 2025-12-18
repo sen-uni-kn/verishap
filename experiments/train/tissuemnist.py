@@ -14,16 +14,17 @@ from jaxtyping import Array, Float, Int, PyTree
 from optax.losses import softmax_cross_entropy_with_integer_labels as cross_entropy
 from torch.utils.data import DataLoader, Dataset
 
-from ..models import resnet18
+from ..models import resnet18, CNN
 
 # ==============================================================================
 # Hyperparameters
 # ==============================================================================
 
 BATCH_SIZE = 128
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 0.01
+MOMENTUM = 0.9
 EPOCHS = 20
-PRINT_EVERY = 500
+PRINT_EVERY = 5000
 SEED = 2011
 OUT_FILE = "tissuemnist-resnet18.eqx"
 
@@ -56,16 +57,16 @@ if __name__ == "__main__":
     # ==============================================================================
 
     key, subkey = jax.random.split(key, 2)
-    # model, state = eqx.nn.make_with_state(CNN)(
-    #     (1, 28, 28),
-    #     8,
-    #     subkey,
-    #     conv_layers=[{"channels": 8}, {"channels": 16}, {"channels": 32}],
-    #     fc_in_sizes=(288, 64),
-    # )
-    model, state = eqx.nn.make_with_state(resnet18)(
-        subkey, in_channels=1, num_classes=8
+    model, state = eqx.nn.make_with_state(CNN)(
+        (1, 28, 28),
+        8,
+        subkey,
+        conv_layers=[{"channels": 8}, {"channels": 16}],
+        fc_in_sizes=(784, 128),
     )
+    # model, state = eqx.nn.make_with_state(resnet18)(
+    #     subkey, in_channels=1, num_classes=8
+    # )
 
     print("=" * 80)
     print("Model:")
@@ -180,7 +181,7 @@ if __name__ == "__main__":
                     )
         return model, state
 
-    optim = optax.adamw(LEARNING_RATE)
+    optim = optax.sgd(LEARNING_RATE, MOMENTUM)
     model, state = train(model, state, trainset, testset, optim, EPOCHS, PRINT_EVERY)
 
-    model.save(state, OUT_FILE)
+    type(model).save(model, state, OUT_FILE)
