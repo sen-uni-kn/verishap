@@ -20,10 +20,10 @@ from ..models import resnet18
 # Hyperparameters
 # ==============================================================================
 
-BATCH_SIZE = 8
+BATCH_SIZE = 128
 LEARNING_RATE = 1e-4
-EPOCHS = 30
-PRINT_EVERY = 100
+EPOCHS = 20
+PRINT_EVERY = 500
 SEED = 2011
 OUT_FILE = "tissuemnist-resnet18.eqx"
 

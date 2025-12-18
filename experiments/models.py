@@ -500,6 +500,7 @@ class ResNet(nn.StatefulLayer):
         super().__init__()
         self.in_channels = in_channels
         self.num_classes = num_classes
+        self.layer1_size, self.layer2_size, self.layer3_size, self.layer4_size = layers
         norm_layer = BatchNorm
         self._norm_layer = norm_layer
 
