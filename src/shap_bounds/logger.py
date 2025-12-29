@@ -15,13 +15,26 @@ representer.SafeRepresenter.add_representer(
 class Logger(Protocol):
     def log_config(self, config_name: str, config1: dict | None = None, **config2): ...
 
-    def log_stats(self, function_name: str, stats1: dict | None = None, temporary: bool = False, **stats2): ...
+    def log_stats(
+        self,
+        function_name: str,
+        stats1: dict | None = None,
+        temporary: bool = False,
+        **stats2,
+    ): ...
 
     def log_iter_stats(
         self, function_name: str, i: int, stats1: dict | None = None, **stats2
     ): ...
 
-    def log_bounds(self, function_name: str, i: int, bounds: Box, name: str = "φ"): ...
+    def log_bounds(
+        self,
+        function_name: str,
+        i: int,
+        bounds: Box | tuple,
+        name: str = "φ",
+        runtime: float | None = None,
+    ): ...
 
 
 class ConsoleLogger(Logger):
@@ -39,7 +52,13 @@ class ConsoleLogger(Logger):
         config = config2 if config1 is None else config1 | config2
         print(", ".join(f"{k}: {v}" for k, v in config.items()))
 
-    def log_stats(self, function_name: str, stats1: dict | None = None, temporary: bool = False, **stats2):
+    def log_stats(
+        self,
+        function_name: str,
+        stats1: dict | None = None,
+        temporary: bool = False,
+        **stats2,
+    ):
         if not temporary:
             self._log_new_function(function_name)
             stats = stats2 if stats1 is None else stats1 | stats2
@@ -54,7 +73,12 @@ class ConsoleLogger(Logger):
         print(f"[i: {i:3d}] {stats}")
 
     def log_bounds(
-        self, function_name: str, i: int, bounds: Box | tuple, name: str = "φ"
+        self,
+        function_name: str,
+        i: int,
+        bounds: Box | tuple,
+        name: str = "φ",
+        runtime: float | None = None,
     ):
         self._log_new_function(function_name)
         lbs, ubs = bounds
@@ -76,6 +100,7 @@ class FileLogger(Logger):
         self.info = {"config": {}}
         self.iter_stats = {}
         self.bounds = {}
+        self.bound_runtimes = {}
         self.directory = directory
         self.directory.mkdir(parents=True, exist_ok=True)
 
@@ -83,7 +108,13 @@ class FileLogger(Logger):
         config = config2 if config1 is None else config1 | config2
         self.info["config"][config_name] = config
 
-    def log_stats(self, function_name: str, stats1: dict | None = None, temporary: bool = False, **stats2):
+    def log_stats(
+        self,
+        function_name: str,
+        stats1: dict | None = None,
+        temporary: bool = False,
+        **stats2,
+    ):
         stats = stats2 if stats1 is None else stats1 | stats2
         self.info[function_name] = stats
 
@@ -96,10 +127,16 @@ class FileLogger(Logger):
         self.iter_stats[function_name][i] = stats
 
     def log_bounds(
-        self, function_name: str, i: int, bounds: Box | tuple, name: str = "φ"
+        self,
+        function_name: str,
+        i: int,
+        bounds: Box | tuple,
+        name: str = "φ",
+        runtime: float | None = None,
     ):
         if function_name not in self.bounds:
             self.bounds[function_name] = []
+            self.bound_runtimes[function_name] = []
         lbs, ubs = bounds
         lbs, ubs = lbs.squeeze(), ubs.squeeze()
         if lbs.ndim == 0:
@@ -109,6 +146,7 @@ class FileLogger(Logger):
                 (i, "ub"): ub.item() for i, ub in enumerate(ubs)
             }
         self.bounds[function_name].append(values)
+        self.bound_runtimes[function_name].append(runtime)
 
     def save_files(self):
         yaml = YAML(typ="safe")
@@ -135,6 +173,8 @@ class FileLogger(Logger):
                 bounds = pd.DataFrame(bounds)
                 print(bounds.iloc[-1])
 
+            bounds["runtime"] = self.bound_runtimes[function_name]
+
             out_file = self.directory / f"{function_name}_bounds.csv"
             bounds.to_csv(out_file, index=False)
             print(f"{function_name} bounds saved to {out_file}.")
@@ -154,7 +194,13 @@ class JoinLoggers(Logger):
         for logger in self.loggers:
             logger.log_config(config_name, config1, **config2)
 
-    def log_stats(self, function_name: str, stats1: dict | None = None, temporary: bool = False, **stats2):
+    def log_stats(
+        self,
+        function_name: str,
+        stats1: dict | None = None,
+        temporary: bool = False,
+        **stats2,
+    ):
         for logger in self.loggers:
             logger.log_stats(function_name, stats1, temporary=temporary, **stats2)
 
@@ -165,10 +211,15 @@ class JoinLoggers(Logger):
             logger.log_iter_stats(function_name, i, stats1, **stats2)
 
     def log_bounds(
-        self, function_name: str, i: int, bounds: Box | tuple, name: str = "φ"
+        self,
+        function_name: str,
+        i: int,
+        bounds: Box | tuple,
+        name: str = "φ",
+        runtime: float | None = None,
     ):
         for logger in self.loggers:
-            logger.log_bounds(function_name, i, bounds, name)
+            logger.log_bounds(function_name, i, bounds, name, runtime)
 
 
 class Silence(Logger):
@@ -177,7 +228,13 @@ class Silence(Logger):
     def log_config(self, config_name: str, config1: dict | None = None, **config2):
         pass
 
-    def log_stats(self, function_name: str, stats1: dict | None = None, temporary: bool = False, **stats2):
+    def log_stats(
+        self,
+        function_name: str,
+        stats1: dict | None = None,
+        temporary: bool = False,
+        **stats2,
+    ):
         pass
 
     def log_iter_stats(
@@ -186,6 +243,11 @@ class Silence(Logger):
         pass
 
     def log_bounds(
-        self, function_name: str, i: int, bounds: Box | tuple, name: str = "φ"
+        self,
+        function_name: str,
+        i: int,
+        bounds: Box | tuple,
+        name: str = "φ",
+        runtime: float | None = None,
     ):
         pass

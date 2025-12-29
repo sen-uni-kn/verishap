@@ -61,8 +61,7 @@ class BranchStack[D: PyTree]:
             branches: The data to insert.
                 Each array in the pytree needs to have a leading batch axis.
         """
-        branches, pytree = jax.tree.flatten(branches)
-        # assert pytree == self.pytree
+        branches, _ = jax.tree.flatten(branches)
         for branch, shape in zip(branches, self.leaf_shapes, strict=True):
             assert branch.shape[1:] == shape
 
@@ -70,7 +69,7 @@ class BranchStack[D: PyTree]:
         self.__stack.append(branches)
 
 
-    def pop(self, return_size: bool = False) -> tuple[D, int]:
+    def pop(self, return_size: bool = False) -> tuple[D, int] | D:
         """Returns the last batch from the stack.
 
         If there are fewer than ``batch_size`` branches in the stack,

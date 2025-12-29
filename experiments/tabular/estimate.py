@@ -41,9 +41,11 @@ if __name__ == "__main__":
                 estims = estimator(num_samples=n)
             if in_feature is None:
                 estims = estims[:, out_feature].squeeze()
-                estims = {i: v for i, v in enumerate(estims)}
+                estims = {f"{i}": v.item() for i, v in enumerate(estims)}
             else:
                 estim = estims[in_feature, out_feature]
-                estims = {in_feature: estim}
+                estims = {f"{in_feature}": estim.item()}
 
-            logger.log_iter_stats("estimate", n, {"runtime": timer_context.runtime}, **estims)
+            logger.log_iter_stats(
+                "estimate", n, {"runtime": timer_context.runtime}, **estims
+            )

@@ -68,8 +68,7 @@ class BranchQueue[D: PyTree]:
             branches: The data to insert.
                 Each array in the pytree needs to have a leading batch axis.
         """
-        branches, pytree = jax.tree.flatten(branches)
-        # assert pytree == self.pytree
+        branches, _ = jax.tree.flatten(branches)
         for branch, shape in zip(branches, self.leaf_shapes, strict=True):
             assert branch.shape[1:] == shape
 
@@ -93,7 +92,7 @@ class BranchQueue[D: PyTree]:
             self.__queue.append(buf2)
             self.__queue.append(buf3)
 
-    def pop(self, return_size: bool = False) -> tuple[D, int]:
+    def pop(self, return_size: bool = False) -> tuple[D, int] | D:
         """Returns the first batch from the queue.
 
         If there are fewer than ``batch_size`` branches in the queue,

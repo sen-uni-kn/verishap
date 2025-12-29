@@ -1,8 +1,7 @@
 # Copyright 2025 David Boetius
 import platform
-from datetime import datetime, timezone
-from pathlib import Path
 import subprocess
+from datetime import datetime, timezone
 
 import cpuinfo
 import GPUtil
@@ -20,7 +19,7 @@ def git_commit() -> str:
         return "unknown"
 
 
-def machine_and_code_details() -> dict[str, str]:
+def machine_and_code_details() -> dict[str, str | int | float]:
     """
     Collects and prints relevant experiment statistics:
      * time
@@ -41,7 +40,7 @@ def machine_and_code_details() -> dict[str, str]:
         "code_version": git_commit(),
         "platform": platform.platform(aliased=True),
         "CPU": {
-            "name": cpuinfo.get_cpu_info()['brand_raw'],
+            "name": cpuinfo.get_cpu_info()["brand_raw"],
             "physical cores": psutil.cpu_count(logical=False),
             "logical cores": psutil.cpu_count(logical=True),
         },

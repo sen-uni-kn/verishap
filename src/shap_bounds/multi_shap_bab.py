@@ -1,8 +1,9 @@
 # Copyright 2025 David Boetius
 import itertools as it
 from collections.abc import Sequence
-from dataclasses import dataclass
-from functools import partial
+from dataclasses import astuple, dataclass
+from math import prod
+from time import perf_counter
 from typing import Callable, Literal
 from warnings import warn
 
@@ -32,6 +33,7 @@ class BranchData:
     # The sum of coalition weights is the same indepedently of
     # the feature we are computing the Shapley value for.
     total_coalition_weight: Real[Array, " b"]
+    pruned: Bool[Array, " b"]  # whether the branch has been pruned
 
 
 def smears(
@@ -47,6 +49,24 @@ def smears(
     )
     smears = compute_bounds(value_grads)
     return smears
+
+
+def resolve_compute_bounds(
+    compute_bounds: Callable | Literal["crown_ibp", "ibp", "crown", "alpha-crown"],
+):
+    if isinstance(compute_bounds, str):
+        match compute_bounds:
+            case "crown_ibp":
+                return crown_ibp
+            case "ibp":
+                return ibp
+            case "crown":
+                return crown
+            case "alpha-crown" | "alpha_crown":
+                return alpha_crown
+            case _:
+                raise ValueError(f"Unknown compute bounds method: {compute_bounds}")
+    return compute_bounds
 
 
 def multi_shap_bab(
@@ -67,6 +87,7 @@ def multi_shap_bab(
         "smart-branching-ibp-worse",
     ] = "smears",
     batch_size: int = 1024,
+    storage_batch_size: int = 256,
     jit: bool = True,
     log: Logger | bool = True,
 ):
@@ -115,27 +136,22 @@ def multi_shap_bab(
     # - val: value
     # - diff: difference
     # --------------------------------------------------------------------------
-    if isinstance(compute_bounds, str):
-        match compute_bounds:
-            case "crown_ibp":
-                compute_bounds = crown_ibp
-            case "ibp":
-                compute_bounds = ibp
-            case "crown":
-                compute_bounds = crown
-            case "alpha-crown" | "alpha_crown":
-                compute_bounds = alpha_crown
-            case _:
-                raise ValueError(f"Unknown compute bounds method: {compute_bounds}")
 
-    if log is True:
-        log = ConsoleLogger()
+    compute_bounds = resolve_compute_bounds(compute_bounds)
+    fast_compute_bounds = resolve_compute_bounds(fast_compute_bounds)
 
     if features is None:
         features = jnp.indices(base_mask.shape).reshape(base_mask.ndim, -1).T
         features = [tuple(f) for f in features.tolist()]
     elif isinstance(features, int):
         features = [features]
+
+    max_num_branches = 2 ** prod(base_mask.shape)
+    if batch_size > max_num_branches:
+        batch_size = max_num_branches
+
+    if log is True:
+        log = ConsoleLogger()
 
     if log is not False:
         log.log_config(
@@ -149,6 +165,7 @@ def multi_shap_bab(
             jit=jit,
         )
     timer = Timer()
+    start_time = perf_counter()
 
     data_axes = tuple(range(1, base_mask.ndim + 1))
     bound_value = compute_bounds(value_fn)
@@ -161,36 +178,45 @@ def multi_shap_bab(
             case "max-diam" | "min-diam":
                 total_coaliw = branches.total_coalition_weight
                 diameters = (branches.value_ub - branches.value_lb) * total_coaliw
-                return diameters if select_strategy == "max-diam" else -diameters
+                scores = diameters if select_strategy == "max-diam" else -diameters
+                return jnp.where(branches.pruned, -jnp.inf, scores)
             case "fifo" | "lifo":
                 return None
             case _:
                 raise ValueError(f"Invalid select strategy: {select_strategy}")
 
     def split(
-        branches: BranchData, split_axes: Int[Array, " b"]
+        coalitions: Box[Real[Array, " b *shape"]],
+        num_splits: Int[Array, " b"],
+        total_coalition_weight: Real[Array, " b"],
+        split_scores: Real[Array, " b f"],
     ) -> tuple[Box[Real[Array, " b *shape"]], Real[Array, " b"]]:
         """Split branches by including/excluding one feature.
 
         Args:
             branches: The branches to split.
-            split_axes: The axes to split on in the flattened coalition mask.
+            split_scores: Scores indicating which feature to split.
+                The feature with the highest score is split.
 
         Returns:
             The coalition bounds and the total coalition weights after splitting.
         """
-        coali_lb, coali_ub = branches.coalitions
+        coali_lb, coali_ub = coalitions
         num_branches = coali_lb.shape[0]
         coali_lb_ = jnp.reshape(coali_lb, (num_branches, -1))
         coali_ub_ = jnp.reshape(coali_ub, (num_branches, -1))
+
+        # mask out fully split branches
+        split_scores = jnp.where(coali_lb_ != coali_ub_, split_scores, -jnp.inf)
+        split_axes = jnp.argmax(split_scores, axis=-1)
 
         left_ub = coali_ub_.at[np.arange(num_branches), split_axes].set(0.0)
         right_lb = coali_lb_.at[np.arange(num_branches), split_axes].set(1.0)
         left_ub = jnp.reshape(left_ub, coali_lb.shape)
         right_lb = jnp.reshape(right_lb, coali_lb.shape)
 
-        s, r = branches.num_splits, coali_lb_.sum(axis=-1)
-        old_total_coaliw = branches.total_coalition_weight
+        s, r = num_splits, coali_lb_.sum(axis=-1)
+        old_total_coaliw = total_coalition_weight
         # left branch is exclude branch
         left_total_coaliw = (s + 1 - r) / (s + 2) * old_total_coaliw
         right_total_coaliw = (r + 1) / (s + 2) * old_total_coaliw
@@ -201,7 +227,7 @@ def multi_shap_bab(
         return Box(new_coali_lb, new_coali_ub), new_total_coaliw
 
     def select_split(branches: BranchData):
-        """Selects one feature to split per branch."""
+        """Computes split scores for each feature of each branch."""
         coali_lb, coali_ub = branches.coalitions
 
         num_branches = coali_lb.shape[0]
@@ -210,19 +236,16 @@ def multi_shap_bab(
 
         if split_strategy == "longest-edge":
             edge_len = jnp.abs(coali_ub_ - coali_lb_)
-            split_axes = jnp.argmax(edge_len, axis=-1)
+            return edge_len
         elif split_strategy == "smears":
             grad_lbs, grad_ubs = value_smears(branches.coalitions).concrete
             smears_ = jnp.maximum(jnp.abs(grad_lbs), jnp.abs(grad_ubs))
-            smears_ = smears_ * jnp.abs(coali_ub_ - coali_lb_)
-            split_axes = jnp.argmax(smears_, axis=-1)
+            return smears_
         elif split_strategy == "lirpa-weights":
             lirpa_bounds = bound_value(branches.coalitions)
             lb_weights = lirpa_bounds.lb_weights[0]
             ub_weights = lirpa_bounds.ub_weights[0]
-            influence = jnp.maximum(jnp.abs(lb_weights), jnp.abs(ub_weights))
-            influence = influence * jnp.abs(coali_ub_ - coali_lb_)
-            split_axes = jnp.argmax(influence, axis=-1)
+            return jnp.maximum(jnp.abs(lb_weights), jnp.abs(ub_weights))
         elif split_strategy.startswith("strong-branching") or split_strategy.startswith(
             "smart-branching-ibp"
         ):
@@ -234,8 +257,23 @@ def multi_shap_bab(
             num_features = coali_lb_.shape[-1]
 
             def eval_split(carry, i: Int[Array, ""]):
-                i_array = jnp.full((num_branches,), i, dtype=int)
-                split_coalis, _ = split(branches, i_array)
+                select_i = (
+                    jnp.zeros(
+                        (
+                            1,
+                            num_features,
+                        ),
+                    )
+                    .at[i]
+                    .set(1.0)
+                )
+                select_i = jnp.repeat(select_i, num_branches, axis=0)
+                split_coalis, _ = split(
+                    branches.coalitions,
+                    branches.num_splits,
+                    branches.total_coalition_weight,
+                    select_i,
+                )
                 val_lbs, val_ubs = compute_bounds(split_coalis).concrete
                 diameter = val_ubs - val_lbs
                 if split_strategy.endswith("-better"):
@@ -246,26 +284,21 @@ def multi_shap_bab(
                     score = diameter.reshape(2, num_branches).max(axis=0)
                 else:
                     raise ValueError(f"Invalid split strategy: {split_strategy}")
-                is_valid = coali_lb_[:, i] != coali_ub_[:, i]
-                return carry, jnp.where(is_valid, score, jnp.inf)
+                return carry, score
 
             _, split_scores = jax.lax.scan(eval_split, None, jnp.arange(num_features))
-            split_axes = jnp.argmin(split_scores, axis=0)
+            return -jnp.moveaxis(split_scores, 0, -1)
         else:
             raise ValueError(f"Invalid split strategy: {split_strategy}")
 
-        return split_axes
-
-    def to_prune(
-        branches: BranchData,
-    ) -> tuple[Bool[Array, " b"], Bool[Array, " b"], Bool[Array, " b"]]:
-        """These steps can be awefully slow for some reason if not jitted."""
+    def to_prune(coalitions, value_lb, value_ub) -> tuple[Bool[Array, " b"], ...]:
+        """Determine which branches to prune."""
         # Prune completely split branches
-        coali_lb, coali_ub = branches.coalitions
+        coali_lb, coali_ub = coalitions
         single_coalition = (coali_lb == coali_ub).all(axis=data_axes)
         # Also prune branches with tight value bounds
-        tight_bounds = jnp.isclose(branches.value_ub, branches.value_lb)
-        invalid_bounds = branches.value_ub < branches.value_lb
+        tight_bounds = jnp.isclose(value_ub, value_lb) | jnp.isclose(value_lb, value_ub)
+        invalid_bounds = ~tight_bounds & (value_ub < value_lb)
         prune = single_coalition | tight_bounds | invalid_bounds
         return prune, single_coalition, tight_bounds, invalid_bounds
 
@@ -280,9 +313,10 @@ def multi_shap_bab(
     )
     data_axes2 = tuple(ax + 1 for ax in data_axes)
 
-    def shap_bounds(branches: BranchData) -> Box:
-        coali_lb, coali_ub = branches.coalitions
-        val_lb, val_ub = branches.value_lb, branches.value_ub
+    def shap_bounds(
+        coalitions, value_lb, value_ub, num_splits, total_coalition_weight, pruned
+    ) -> Box:
+        coali_lb, coali_ub = coalitions
 
         # branches where all sets contain the feature (i)
         with_i: Real[Array, " f b"]
@@ -298,154 +332,211 @@ def multi_shap_bab(
         # feature too much, while the coalition weights for the
         # without_i branches exclude one feature too much.
         # The "both" branches already have the correct coalition weights.
-        s, r = branches.num_splits, coali_lb.sum(axis=data_axes)
-        sum_coaliw = branches.total_coalition_weight
+        s, r = num_splits, coali_lb.sum(axis=data_axes)
+        sum_coaliw = total_coalition_weight
         # Reduce number of included features by one
         sum_coaliw_with_i = (s + 1) / r * sum_coaliw
         # Reduce number of excluded features by one
         sum_coaliw_without_i = (s + 1) / (s - r) * sum_coaliw
 
+        # Deal with invalid value bounds (originating from floating point errors)
+        value_mid = (value_lb + value_ub) / 2
+        value_lb = jnp.where(value_ub < value_lb, value_mid, value_lb)
+        value_ub = jnp.where(value_ub < value_lb, value_mid, value_ub)
+
         # Computing bounds on: sum lambda * v(S + {i}) - sum lambda * v(S)
-        contrib_lb = (
-            sum_coaliw_with_i * val_lb * with_i
-            + sum_coaliw * val_lb * both
-            - sum_coaliw * val_ub * both
-            - sum_coaliw_without_i * val_ub * without_i
-        )  # .sum(axis=-1)  # sum outside jitted code to handle padding correctly
-        contrib_ub = (
-            sum_coaliw_with_i * val_ub * with_i
-            + sum_coaliw * val_ub * both
-            - sum_coaliw * val_lb * both
-            - sum_coaliw_without_i * val_lb * without_i
-        )  # .sum(axis=-1)
-        contrib_lb: Real[Array, " b f"] = jnp.moveaxis(contrib_lb, -1, 0)
-        contrib_ub = jnp.moveaxis(contrib_ub, -1, 0)
-        return Box(contrib_lb, contrib_ub)
+        shap_lb: Real[Array, " f b"] = (
+            sum_coaliw_with_i * value_lb * with_i
+            + sum_coaliw * value_lb * both
+            - sum_coaliw * value_ub * both
+            - sum_coaliw_without_i * value_lb * without_i
+        )
+        shap_ub = (
+            sum_coaliw_with_i * value_ub * with_i
+            + sum_coaliw * value_ub * both
+            - sum_coaliw * value_lb * both
+            - sum_coaliw_without_i * value_lb * without_i
+        )
+        shap_lb = jnp.where(pruned, 0.0, shap_lb).sum(axis=-1)
+        shap_ub = jnp.where(pruned, 0.0, shap_ub).sum(axis=-1)
+        return Box(shap_lb, shap_ub)
 
     def bab_step(
-        batch: BranchData, num_branches: int
+        batch: BranchData,
     ) -> tuple[
         BranchData,
         Real[Array, ""],
-        Real[Array, ""],
-        tuple[Bool[Array, " b"], Bool[Array, " b"], Bool[Array, " b"]],
+        tuple[Box, Box],
+        Sequence[Bool[Array, " b"]],
     ]:
-        old_shap_bounds = shap_bounds(batch)
+        old_shap_bounds = shap_bounds(*astuple(batch))
 
-        split_axes = select_split(batch)
-        new_coalitions, new_total_coaliw = split(batch, split_axes)
+        split_scores = select_split(batch)
+        new_coalitions, new_total_coaliw = split(
+            batch.coalitions,
+            batch.num_splits,
+            batch.total_coalition_weight,
+            split_scores,
+        )
         new_value_lbs, new_value_ubs = bound_value(new_coalitions).concrete
         new_num_splits = jnp.concat(
             [batch.num_splits + 1, batch.num_splits + 1], axis=0
         )
+
+        # Need to compute new shap bounds with old pruning status
+        new_shap_bounds = shap_bounds(
+            new_coalitions,
+            new_value_lbs,
+            new_value_ubs,
+            new_num_splits,
+            new_total_coaliw,
+            pruned=jnp.concat([batch.pruned, batch.pruned], axis=0),
+        )
+
+        prune, *prune_log_info = to_prune(new_coalitions, new_value_lbs, new_value_ubs)
         new_branches = BranchData(
             new_coalitions,
             new_value_lbs,
             new_value_ubs,
             new_num_splits,
             new_total_coaliw,
+            prune,
         )
-
         priority = selection_priority(new_branches)
-        new_shap_bounds = shap_bounds(new_branches)
         return (
             new_branches,
             priority,
             (old_shap_bounds, new_shap_bounds),
-            to_prune(new_branches),
+            prune_log_info,
         )
 
-    def drop_pruned(
-        prune: Bool[Array, " b"], array: Real[Array, " b *shape"]
-    ) -> Real[Array, " c *shape"]:
-        return array[~prune]
+    def drop_pruned(branches: BranchData) -> BranchData:
+        prune = branches.pruned
+        return jax.tree.map(lambda a: a[~prune], branches)
 
     if jit:
-        bab_step_jit = jax.jit(bab_step, static_argnums=(1,))
-
-        def pad(x, padding: int):
-            pad_val = jnp.empty((padding, *x.shape[1:]), dtype=x.dtype)
-            return jnp.concat([x, pad_val], axis=0)
-
-        def unpad(x_padded, num_branches: int):
-            # the values that we unpad have twice the batch size
-            # since they contain first the left branch and
-            # then the right branches
-            left = x_padded[:num_branches]
-            right = x_padded[batch_size : batch_size + num_branches]
-            return jnp.concat([left, right], axis=0)
-
-        def bab_step(batch: BranchData, num_branches: int):
-            padding = batch_size - num_branches
-            padded = jax.tree.map(partial(pad, padding=padding), batch)
-            out_padded = bab_step_jit(padded, num_branches=batch_size)
-            out = jax.tree.map(partial(unpad, num_branches=num_branches), out_padded)
-            return out
+        bab_step = jax.jit(bab_step)
 
     # Root branch
     all_coalitions = Box(
         jnp.zeros((1,) + base_mask.shape, dtype=base_mask.dtype),
         jnp.ones((1,) + base_mask.shape, dtype=base_mask.dtype),
     )
-    zero = jnp.zeros((1,), dtype=int)
-    total_coaliw = jnp.ones((1,), dtype=base_mask.dtype)
     value_lb, value_ub = bound_value(all_coalitions).concrete
-    root_data = BranchData(all_coalitions, value_lb, value_ub, zero, total_coaliw)
+    root_data = BranchData(
+        all_coalitions,
+        value_lb,
+        value_ub,
+        num_splits=jnp.zeros((1,), dtype=int),
+        total_coalition_weight=jnp.ones((1,), dtype=base_mask.dtype),
+        pruned=jnp.full((1,), False),
+    )
+
+    # Prefill one batch of branches without computing bounds
+    split_scores = select_split(root_data)
+    coalitions = root_data.coalitions
+    num_splits = root_data.num_splits
+    total_coaliw = root_data.total_coalition_weight
+    while coalitions.shape[0] < batch_size:
+        coalitions, total_coaliw = split(
+            coalitions, num_splits, total_coaliw, split_scores
+        )
+        num_splits = jnp.concat([num_splits + 1, num_splits + 1], axis=0)
+
+    value_lb, value_ub = bound_value(coalitions).concrete
+    prune, single_coalition, tight_bounds, invalid_bounds = to_prune(
+        coalitions, value_lb, value_ub
+    )
+    # Since we limited the batch size to be at maximum the total number of possible
+    # branches, the branches may be fully split, but not split in an invalid way
+    # so far.
+    shap_lbs, shap_ubs = shap_bounds(
+        coalitions,
+        value_lb,
+        value_ub,
+        num_splits,
+        total_coaliw,
+        jnp.full((coalitions.shape[0],), False),
+    )
+    prefilled = BranchData(
+        coalitions, value_lb, value_ub, num_splits, total_coaliw, prune
+    )
+
+    total_fully_split = num_fully_split = single_coalition.sum().item()
+    total_tight_bounds = num_tight = (tight_bounds & ~single_coalition).sum().item()
+    total_invalid_bounds = num_invalid_bounds = invalid_bounds.sum().item()
+    total_pruned = prune.sum().item()
+
+    if log is not False:
+        num_branches = coalitions.shape[0]
+        log.log_iter_stats(
+            "multi_shap_bab",
+            0,
+            num_branches=num_branches,
+            num_fully_split=num_fully_split,
+            num_tight=num_tight,
+            num_invalid_bounds=num_invalid_bounds,
+        )
+        log.log_bounds(
+            "multi_shap_bab",
+            0,
+            Box(shap_lbs, shap_ubs),
+            name="φ",
+            runtime=perf_counter() - start_time,
+        )
+
+    yield Box(shap_lbs.squeeze(), shap_ubs.squeeze())
 
     match select_strategy:
         case "fifo":
-            branches = BranchQueue(root_data, batch_size)
+            pruned = drop_pruned(prefilled)
+            branches = BranchQueue(pruned, batch_size)
         case "lifo":
-            branches = BranchStack(root_data, batch_size)
+            pruned = drop_pruned(prefilled)
+            branches = BranchStack(pruned, batch_size)
         case _:
             branches = PriorityBranchStore(
-                selection_priority(root_data), root_data, batch_size
+                selection_priority(prefilled), prefilled, batch_size
             )
+            branches.drop(max_priority=-float("inf"))
 
-    shap_lbs, shap_ubs = jax.tree.map(lambda x: x.squeeze(), shap_bounds(root_data))
-    total_tight_bounds = total_fully_split = total_invalid_bounds = 0
-    yield Box(shap_lbs.squeeze(), shap_ubs.squeeze())
-    for i in it.count():
+    for i in it.count(1):
         if (
             len(branches) == 0
             or jnp.allclose(shap_lbs, shap_ubs)
             or jnp.allclose(shap_ubs, shap_lbs)  # allclose is not symmetric
-            or jnp.any(shap_lbs > shap_ubs)  # invalid value bounds propagating
         ):
             break
 
         with timer["pop"]:
-            batch, num_selected = branches.pop(return_size=True)
+            batch = branches.pop()
         with timer["bab_step"]:
             (
                 new_branches,
                 priority,
                 ((old_shap_lbs, old_shap_ubs), (new_shap_lbs, new_shap_ubs)),
-                (prune, single_coalition, tight_bounds, invalid_bounds),
-            ) = bab_step(batch, num_selected)
+                (single_coalition, tight_bounds, invalid_bounds),
+            ) = bab_step(batch)
 
         with timer["update_shap_bounds"]:
-            # the shap_lbs and shap_ubs still have branch axes
-            shap_lbs = shap_lbs - old_shap_lbs.sum(axis=0) + new_shap_lbs.sum(axis=0)
-            shap_ubs = shap_ubs - old_shap_ubs.sum(axis=0) + new_shap_ubs.sum(axis=0)
+            shap_lbs = shap_lbs - old_shap_lbs + new_shap_lbs
+            shap_ubs = shap_ubs - old_shap_ubs + new_shap_ubs
         yield Box(shap_lbs.squeeze(), shap_ubs.squeeze())
 
-        with timer["drop_pruned"]:
-            # shapley bounds from the pruned branches remain part of the global bounds
-            pruned, pruned_priority = jax.tree.map(
-                partial(drop_pruned, prune), (new_branches, priority)
-            )
-
         with timer["insert_branches"]:
-            match select_strategy:
-                case "fifo" | "lifo":
-                    branches.insert(pruned)
-                case _:
-                    branches.insert(pruned_priority, pruned)
+            if isinstance(branches, PriorityBranchStore):
+                branches.insert(priority, new_branches)
+                # drops pruned branches if they fill a batch
+                branches.drop(max_priority=-float("inf"))
+            else:
+                # shap bounds from the pruned branches remain part of the global bounds
+                pruned = drop_pruned(new_branches)
+                branches.insert(pruned)
 
         num_fully_split = single_coalition.sum().item()
         num_tight = (tight_bounds & ~single_coalition).sum().item()
         num_invalid_bounds = invalid_bounds.sum().item()
+        num_pruned = (single_coalition | tight_bounds | invalid_bounds).sum().item()
 
         if num_invalid_bounds > 0 and total_invalid_bounds == 0:
             warn(
@@ -457,6 +548,7 @@ def multi_shap_bab(
         total_invalid_bounds += num_invalid_bounds
         total_fully_split += num_fully_split
         total_tight_bounds += num_tight
+        total_pruned += num_pruned
 
         if log is not False:
             num_branches = len(branches)
@@ -468,7 +560,13 @@ def multi_shap_bab(
                 num_tight=num_tight,
                 num_invalid_bounds=num_invalid_bounds,
             )
-            log.log_bounds("multi_shap_bab", i, (shap_lbs, shap_ubs), name="φ")
+            log.log_bounds(
+                "multi_shap_bab",
+                i,
+                Box(shap_lbs, shap_ubs),
+                name="φ",
+                runtime=perf_counter() - start_time,
+            )
             total_branches = total_tight_bounds + total_fully_split
             log.log_stats(
                 "multi_shap_bab",
@@ -480,12 +578,13 @@ def multi_shap_bab(
                 total_invalid_bounds=total_invalid_bounds,
             )
 
-    total_branches = total_tight_bounds + total_fully_split + total_invalid_bounds
-    log.log_stats(
-        "multi_shap_bab",
-        {"runtimes": timer.runtimes, "iterations": i},
-        total_branches=total_branches,
-        total_tight_bounds=total_tight_bounds,
-        total_fully_split=total_fully_split,
-        total_invalid_bounds=total_invalid_bounds,
-    )
+    total_branches = total_pruned
+    if log is not False:
+        log.log_stats(
+            "multi_shap_bab",
+            {"runtimes": timer.runtimes, "iterations": i},
+            total_branches=total_branches,
+            total_tight_bounds=total_tight_bounds,
+            total_fully_split=total_fully_split,
+            total_invalid_bounds=total_invalid_bounds,
+        )

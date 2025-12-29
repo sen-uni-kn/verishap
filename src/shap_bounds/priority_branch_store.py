@@ -11,6 +11,7 @@ __all__ = [
 ]
 
 
+@jax.tree_util.register_pytree_node_class
 class _HeapNode:
     """A node in the heap."""
 
@@ -19,6 +20,13 @@ class _HeapNode:
     def __init__(self, priority: Real[Array, " b"], data: Sequence[Array]):
         self.priority = jnp.atleast_1d(priority)
         self.data = [jnp.atleast_1d(d) for d in data]
+
+    def tree_flatten(self):
+        return ((self.priority, self.data), None)
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        return cls(*children)
 
     @property
     def highest_priority(self) -> Real[Array, ""] | None:
@@ -35,8 +43,35 @@ class _HeapNode:
     def __len__(self) -> int:
         return self.priority.shape[0]
 
-    def __getitem__(self, idx: int) -> Array:
+    def __getitem__(self, idx: slice | int) -> "_HeapNode":
         return _HeapNode(self.priority[idx], [d[idx] for d in self.data])
+
+
+@jax.jit(static_argnames=("batch_size",))
+def _split_sort(
+    left: _HeapNode, right: _HeapNode, batch_size: int
+) -> tuple[_HeapNode, _HeapNode]:
+    """Sorts the data in two nodes and returns the sorted data as two new nodes.
+
+    Args:
+        left: The left node to sort.
+        right: The right node to sort.
+
+    Returns:
+        A tuple of two new nodes with the sorted data.
+        The first node contains the data with the higher priority.
+        The first node is filled up to the batch size.
+        The second node contains any remaining data.
+    """
+    prios = jnp.concat([left.priority, right.priority])
+    sorted_idx = jnp.argsort(prios, descending=True)
+    top_idx = sorted_idx[:batch_size]
+    bottom_idx = sorted_idx[batch_size:]
+
+    data = [jnp.concat([ld, rd]) for ld, rd in zip(left.data, right.data, strict=True)]
+    top = _HeapNode(prios[top_idx], [d[top_idx] for d in data])
+    bottom = _HeapNode(prios[bottom_idx], [d[bottom_idx] for d in data])
+    return top, bottom
 
 
 class PriorityBranchStore[D: PyTree]:
@@ -69,16 +104,16 @@ class PriorityBranchStore[D: PyTree]:
         BGPQ: A Heap-Based Priority Queue Design for GPUs. ICPP 2021: 9:1-9:10
     """
 
-    def __init__(self, priority: Real[Array, " 1"], root_entry: D, batch_size: int):
+    def __init__(self, priority: Real[Array, " b"], root_entry: D, batch_size: int):
         root_data, pytree = jax.tree.flatten(root_entry)
         self.num_leaves = len(root_data)
         self.pytree = pytree
 
         for data in root_data:
-            if data.ndim == 0 or data.shape[0] != 1:
+            if data.ndim == 0:
                 raise ValueError(
-                    "Each array in the root entry must have a leading batch "
-                    f"axis of size 1. Got shape {data.shape}."
+                    "Each array in the root entry must have a leading batch axis."
+                    f" Got shape {data.shape}."
                 )
 
         self.leaf_shapes = tuple(data.shape[1:] for data in root_data)
@@ -86,13 +121,9 @@ class PriorityBranchStore[D: PyTree]:
 
         # We index the __nodes list like the array in an array-based heap.
         self.__nodes = []
-        if batch_size > 1:
-            # Holds inserted data until the data makes up a full batch.
-            self.__buffer = _HeapNode(priority, root_data)
-        else:
-            self.__nodes.append(_HeapNode(priority, root_data))
-            self.__buffer = self._empty_node()
-        self.__size = 1
+        self.__buffer = self._empty_node()
+        self.__size = 0
+        self.insert(priority, root_entry)
 
     def __len__(self) -> int:
         assert self.__size >= 0
@@ -123,8 +154,7 @@ class PriorityBranchStore[D: PyTree]:
                 Each array in the pytree needs to have a leading batch axis.
         """
         assert priority.shape[0] <= 2 * self.batch_size
-        branches, pytree = jax.tree.flatten(branches)
-        # assert pytree == self.pytree
+        branches, _ = jax.tree.flatten(branches)
         for branch, shape in zip(branches, self.leaf_shapes, strict=True):
             assert branch.shape[1:] == shape
 
@@ -161,11 +191,11 @@ class PriorityBranchStore[D: PyTree]:
             self.__nodes.append(buf3)
             heapify(len(self.__nodes) - 1)
 
-    def pop(self, return_size: bool = False) -> tuple[D, int]:
+    def pop(self, return_size: bool = False) -> tuple[D, int] | D:
         """Alias for ``extract_max``."""
         return self.extract_max(return_size)
 
-    def extract_max(self, return_size: bool = False) -> tuple[D, int]:
+    def extract_max(self, return_size: bool = False) -> tuple[D, int] | D:
         """Returns the data with the highest priority as a batch of size ``batch_size``.
 
         If there are fewer than ``batch_size`` branches in the queue,
@@ -190,32 +220,25 @@ class PriorityBranchStore[D: PyTree]:
         else:
             return out
 
+    def drop(self, max_priority: float):
+        """Drops branches with priorities less than or equal to ``max_priority``.
+
+        Only drops branches if they make up a complete batch.
+
+        Args:
+            max_priority: The maximum priority of the branches to drop.
+        """
+        while len(self.__nodes) > 0 and self.__nodes[-1].highest_priority <= max_priority:
+            self.__nodes.pop()
+            self.__size -= self.batch_size
+        if len(self.__buffer) > 0 and self.__buffer.highest_priority <= max_priority:
+            self.__size -= len(self.__buffer)
+            self.__buffer = self._empty_node()
+
     def _split_sort(
         self, left: _HeapNode, right: _HeapNode
     ) -> tuple[_HeapNode, _HeapNode]:
-        """Sorts the data in two nodes and returns the sorted data as two new nodes.
-
-        Args:
-            left: The left node to sort.
-            right: The right node to sort.
-
-        Returns:
-            A tuple of two new nodes with the sorted data.
-            The first node contains the data with the higher priority.
-            The first node is filled up to the batch size.
-            The second node contains any remaining data.
-        """
-        prios = jnp.concat([left.priority, right.priority])
-        sorted_idx = jnp.argsort(prios, descending=True)
-        top_idx = sorted_idx[: self.batch_size]
-        bottom_idx = sorted_idx[self.batch_size :]
-
-        data = [
-            jnp.concat([ld, rd]) for ld, rd in zip(left.data, right.data, strict=True)
-        ]
-        top = _HeapNode(prios[top_idx], [d[top_idx] for d in data])
-        bottom = _HeapNode(prios[bottom_idx], [d[bottom_idx] for d in data])
-        return top, bottom
+        return _split_sort(left, right, batch_size=self.batch_size)
 
     def _heapify_up(self, i: int):
         if i == 0:

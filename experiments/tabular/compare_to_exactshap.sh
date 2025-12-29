@@ -6,7 +6,7 @@ HARD_TIMEOUT=960  # +60 seconds for setup, etc
 BAB_WARMUP_TIMEOUT=300  # 5min for downloading data and JAX compilation
 EXACTSHAP_WARMUP_TIMEOUT=60
 
-BATCH_SIZE=16384
+BATCH_SIZE=4096
 # Sorted by input dimension
 NETWORKS=(
   "iris-mlp-32x2.eqx"

@@ -21,8 +21,8 @@ def load_dataset(dataset: str) -> tuple[np.ndarray, np.ndarray]:
     elif dataset.startswith("independentlinear"):
         num_features = int(dataset[-2:])
         data, targets = independentlinear(num_features)
-    elif hasattr(globals(), dataset):
-        data, targets = getattr(globals(), dataset)()
+    elif dataset in globals():
+        data, targets = globals()[dataset]()
     elif hasattr(shap.datasets, dataset):
         data, targets = getattr(shap.datasets, dataset)()
         data = data.to_numpy().astype(np.float32)
