@@ -12,6 +12,7 @@ def _load_bab_run(info_path: Path) -> dict | None:
     with info_path.open("r") as f:
         info = yaml.safe_load(f)
 
+    print("Loading", info_path)
     dataset, *_ = info_path.parent.name.split("-")
     dataset_dim = len(info["config"]["multi_shap_bab"]["features"])
 
@@ -21,6 +22,14 @@ def _load_bab_run(info_path: Path) -> dict | None:
     all_separated_rt = info.get("overall", {}).get("runtime", {}).get("all_separated")
     largest_shap_rt = info.get("overall", {}).get("runtime", {}).get("largest_shap")
     smallest_shap_rt = info.get("overall", {}).get("runtime", {}).get("smallest_shap")
+    max_range_less_than_1_rt = info.get("overall", {}).get("runtime", {}).get("max_range_less_than_1")
+    max_range_less_than_0_01_rt = info.get("overall", {}).get("runtime", {}).get("max_range_less_than_0.01")
+    max_range_less_than_0_001_rt = info.get("overall", {}).get("runtime", {}).get("max_range_less_than_0.001")
+    max_range_less_than_0_0001_rt = info.get("overall", {}).get("runtime", {}).get("max_range_less_than_0.0001")
+    max_range_less_than_0_00001_rt = info.get("overall", {}).get("runtime", {}).get("max_range_less_than_0.00001")
+    max_range_less_than_0_000001_rt = info.get("overall", {}).get("runtime", {}).get("max_range_less_than_0.000001")
+    max_range_less_than_0_0000001_rt = info.get("overall", {}).get("runtime", {}).get("max_range_less_than_0.0000001")
+    max_range_less_than_0_00000001_rt = info.get("overall", {}).get("runtime", {}).get("max_range_less_than_0.00000001")
 
     if timeout:
         overall_rt = 900
@@ -32,6 +41,22 @@ def _load_bab_run(info_path: Path) -> dict | None:
             largest_shap_rt = 900
         if smallest_shap_rt is None:
             smallest_shap_rt = 900
+        if max_range_less_than_1_rt is None:
+            max_range_less_than_1_rt = 900
+        if max_range_less_than_0_01_rt is None:
+            max_range_less_than_0_01_rt = 900
+        if max_range_less_than_0_001_rt is None:
+            max_range_less_than_0_001_rt = 900
+        if max_range_less_than_0_0001_rt is None:
+            max_range_less_than_0_0001_rt = 900
+        if max_range_less_than_0_00001_rt is None:
+            max_range_less_than_0_00001_rt = 900
+        if max_range_less_than_0_000001_rt is None:
+            max_range_less_than_0_000001_rt = 900
+        if max_range_less_than_0_0000001_rt is None:
+            max_range_less_than_0_0000001_rt = 900
+        if max_range_less_than_0_00000001_rt is None:
+            max_range_less_than_0_00000001_rt = 900
 
     return {
         "dataset": dataset,
@@ -42,6 +67,14 @@ def _load_bab_run(info_path: Path) -> dict | None:
         "all_separated_rt": all_separated_rt,
         "largest_shap_rt": largest_shap_rt,
         "smallest_shap_rt": smallest_shap_rt,
+        "max_range_less_than_1_rt": max_range_less_than_1_rt,
+        "max_range_less_than_0_01_rt": max_range_less_than_0_01_rt,
+        "max_range_less_than_0_001_rt": max_range_less_than_0_001_rt,
+        "max_range_less_than_0_0001_rt": max_range_less_than_0_0001_rt,
+        "max_range_less_than_0_00001_rt": max_range_less_than_0_00001_rt,
+        "max_range_less_than_0_000001_rt": max_range_less_than_0_000001_rt,
+        "max_range_less_than_0_0000001_rt": max_range_less_than_0_0000001_rt,
+        "max_range_less_than_0_00000001_rt": max_range_less_than_0_00000001_rt,
     }
 
 
@@ -84,6 +117,14 @@ def main(data_dir: Path) -> None:
         data[run["dataset"]]["bab_all_separated"] = run["all_separated_rt"]
         data[run["dataset"]]["bab_largest_shap"] = run["largest_shap_rt"]
         data[run["dataset"]]["bab_smallest_shap"] = run["smallest_shap_rt"]
+        data[run["dataset"]]["bab_max_range_less_than_1"] = run["max_range_less_than_1_rt"]
+        data[run["dataset"]]["bab_max_range_less_than_0_01"] = run["max_range_less_than_0_01_rt"]
+        data[run["dataset"]]["bab_max_range_less_than_0_001"] = run["max_range_less_than_0_001_rt"]
+        data[run["dataset"]]["bab_max_range_less_than_0_0001"] = run["max_range_less_than_0_0001_rt"]
+        data[run["dataset"]]["bab_max_range_less_than_0_00001"] = run["max_range_less_than_0_00001_rt"]
+        data[run["dataset"]]["bab_max_range_less_than_0_000001"] = run["max_range_less_than_0_000001_rt"]
+        data[run["dataset"]]["bab_max_range_less_than_0_0000001"] = run["max_range_less_than_0_0000001_rt"]
+        data[run["dataset"]]["bab_max_range_less_than_0_00000001"] = run["max_range_less_than_0_00000001_rt"]
     for run in exactshap_runs:
         data[run["dataset"]]["exactshap"] = run["overall_rt"]
 

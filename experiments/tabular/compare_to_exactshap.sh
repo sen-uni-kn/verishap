@@ -1,8 +1,8 @@
 #!/bin/bash
 
 HERE="$(dirname "$0")"
-TIMEOUT=3600  # 1h
-HARD_TIMEOUT=3660  # +60 seconds for setup, etc
+TIMEOUT=1800  # 30min
+HARD_TIMEOUT=2000  # +200 seconds for setup, etc
 BAB_WARMUP_TIMEOUT=300  # 5min for downloading data and JAX compilation
 EXACTSHAP_WARMUP_TIMEOUT=60
 
@@ -64,7 +64,7 @@ for network in "${NETWORKS[@]}"; do
         --shap-variant "zero-baseline" \
         --out "$OUT_DIR" \
       
-    sleep 5
+    sleep 15s
     printf "\n\nRunning ExactSHAP on ${network}...\n"
 
     OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/ExactSHAP/${network_name}"
@@ -83,7 +83,7 @@ for network in "${NETWORKS[@]}"; do
     fi
   fi
 
-  sleep 5
+  sleep 15s
   printf "\n\nRunning Warmup for Branch and Bound on ${network}...\n"
 
   OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/warmup/BaB/${network_name}"
@@ -99,7 +99,7 @@ for network in "${NETWORKS[@]}"; do
       --max-iters 2 \
       --timeout "$BAB_WARMUP_TIMEOUT"
 
-  sleep 5
+  sleep 15s
   printf "\n\nRunning Branch and Bound on ${network}...\n"
 
   OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/BaB/${network_name}"
@@ -114,6 +114,7 @@ for network in "${NETWORKS[@]}"; do
       --out "$OUT_DIR" \
       --timeout "$TIMEOUT" \
       --silent
+  sleep 15s
 done
 
 printf "Experiment complete.\n"

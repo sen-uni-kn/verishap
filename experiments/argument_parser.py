@@ -134,6 +134,13 @@ class CmdArgs:
             default=default,
             help="The index of the input sample to analyse in the dataset.",
         )
+        self.parser.add_argument(
+            "--set-to-baseline",
+            type=int,
+            default=0,
+            help="How many features to set to the baseline value. "
+            "Only available for baseline SHAP variants.",
+        )
         return self
 
     def feature_args(self) -> "CmdArgs":
@@ -249,6 +256,18 @@ class CmdArgs:
     @property
     def all_arguments(self) -> dict:
         return {key: str(value) for key, value in vars(self.args).items()}
+
+    @property
+    def seed(self) -> int:
+        return self.args.seed
+
+    @property
+    def input(self) -> int:
+        return self.args.input
+
+    @property
+    def feature(self) -> int | None:
+        return self.args.feature
 
     @property
     def output_feature(self) -> int | None:
@@ -398,12 +417,20 @@ class CmdArgs:
         return None
 
     @property
+    def raw_sample(self) -> np.ndarray:
+        return jnp.asarray(self.data[self.args.input])
+
+    @property
     def sample(self) -> np.ndarray:
-        return self.data[self.input]
+        x = self.raw_sample
+        if self.args.set_to_baseline > 0:
+            baseline = self.baseline[: self.args.set_to_baseline]
+            x = x.at[: self.args.set_to_baseline].set(baseline)
+        return x
 
     @property
     def background_data(self) -> np.ndarray:
-        num_background = self.num_background_samples
+        num_background = self.args.num_background_samples
         data = self.data
         rng = np.random.default_rng(0)
         perm = rng.permutation(len(data))
@@ -412,6 +439,17 @@ class CmdArgs:
     @property
     def data_mean(self) -> np.ndarray:
         return self.data[:].mean(axis=0)
+
+    @property
+    def baseline(self) -> jax.Array | None:
+        x = self.raw_sample
+        match self.shap_variant:
+            case "zero-baseline":
+                return jnp.zeros_like(x)
+            case "mean-baseline":
+                return self.data_mean.reshape(x.shape)
+            case _:
+                return None
 
     @property
     def base_mask(self) -> np.ndarray:
@@ -430,23 +468,13 @@ class CmdArgs:
 
         x = self.sample
         match shap_variant:
-            case "zero-baseline":
-                baseline = jnp.zeros_like(x)
-                return baseline_value(self.model, x, baseline, out_feature)
-            case "mean-baseline":
-                baseline = self.data_mean.reshape(x.shape)
-                return baseline_value(self.model, x, baseline, out_feature)
+            case "zero-baseline" | "mean-baseline":
+                return baseline_value(self.model, x, self.baseline, out_feature)
             case "marginal":
                 return marginal_value(self.model, x, self.background_data, out_feature)
-            case "superfeature-zero-baseline":
-                baseline = jnp.zeros_like(x)
+            case "superfeature-zero-baseline" | "superfeature-mean-baseline":
                 return superfeature_baseline_value(
-                    self.model, x, baseline, masks, out_feature
-                )
-            case "superfeature-mean-baseline":
-                baseline = self.data_mean.reshape(x.shape)
-                return superfeature_baseline_value(
-                    self.model, x, baseline, masks, out_feature
+                    self.model, x, self.baseline, masks, out_feature
                 )
             case "superfeature-marginal":
                 return superfeature_marginal_value(
@@ -454,6 +482,10 @@ class CmdArgs:
                 )
             case _:
                 raise ValueError(f"Unknown SHAP variant: {self.shap_variant}")
+
+    @property
+    def shap_variant(self) -> str:
+        return self.args.shap_variant
 
     def bound_method(self, logger: Logger) -> Callable:
         match self.args.bound_method.lower():
@@ -473,8 +505,8 @@ class CmdArgs:
     @property
     def bound_kwargs(self) -> dict:
         bound_kwargs = {}
-        if self.bound_options:
-            for option in self.bound_options.split(","):
+        if self.args.bound_options:
+            for option in self.args.bound_options.split(","):
                 k, v = option.split("=")
                 try:
                     v = eval(v, {})
@@ -482,6 +514,14 @@ class CmdArgs:
                     pass
                 bound_kwargs[k] = v
         return bound_kwargs
+
+    @property
+    def max_iters(self) -> int | None:
+        return self.args.max_iters
+
+    @property
+    def timeout(self) -> float | None:
+        return self.args.timeout
 
     def estimator(self) -> Callable:
         shap_variant = self.shap_variant
@@ -614,7 +654,6 @@ class CmdArgs:
         out_file.mkdir(parents=True, exist_ok=True)
         return out_file
 
-    def __getattr__(self, name: str) -> Any:
-        if self.args is None:
-            raise AttributeError("Arguments not parsed yet. Call `parse_args()` first.")
-        return getattr(self.args, name)
+    @property
+    def silent(self) -> bool:
+        return self.args.silent

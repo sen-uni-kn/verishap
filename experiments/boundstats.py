@@ -53,20 +53,60 @@ class BoundStats:
             self.iter_stats["some_neg"] = i
 
         max_range = jnp.max(ub - lb).item()
+        if max_range < 1.0 and "max_ran_lt_1e0" not in self.time_stats:
+            self.time_stats["max_ran_lt_1e0"] = runtime
+            self.iter_stats["max_ran_lt_1e0"] = i
+        if max_range < 0.1 and "max_ran_lt_1e-1" not in self.time_stats:
+            self.time_stats["max_ran_lt_1e-1"] = runtime
+            self.iter_stats["max_ran_lt_1e-1"] = i
+        if max_range < 0.01 and "max_ran_lt_1e-2" not in self.time_stats:
+            self.time_stats["max_ran_lt_1e-2"] = runtime
+            self.iter_stats["max_ran_lt_1e-2"] = i
+        if max_range < 0.001 and "max_ran_lt_1e-3" not in self.time_stats:
+            self.time_stats["max_ran_lt_1e-3"] = runtime
+            self.iter_stats["max_ran_lt_1e-3"] = i
 
-        print("Max range:", max_range)
+        min_range = jnp.max(ub - lb).item()
+        if min_range < 1.0 and "min_ran_lt_1e0" not in self.time_stats:
+            self.time_stats["min_ran_lt_1e0"] = runtime
+            self.iter_stats["min_ran_lt_1e0"] = i
+        if min_range < 0.1 and "min_ran_lt_1e-1" not in self.time_stats:
+            self.time_stats["min_ran_lt_1e-1"] = runtime
+            self.iter_stats["min_ran_lt_1e-1"] = i
+        if min_range < 0.01 and "min_ran_lt_1e-2" not in self.time_stats:
+            self.time_stats["min_ran_lt_1e-2"] = runtime
+            self.iter_stats["min_ran_lt_1e-2"] = i
+        if min_range < 0.001 and "min_ran_lt_1e-3" not in self.time_stats:
+            self.time_stats["min_ran_lt_1e-3"] = runtime
+            self.iter_stats["min_ran_lt_1e-3"] = i
 
-        if max_range < 1.0 and "ran_lt_1e0" not in self.time_stats:
-            self.time_stats["ran_lt_1e0"] = runtime
-            self.iter_stats["ran_lt_1e0"] = i
-        if max_range < 0.1 and "ran_lt_1e-1" not in self.time_stats:
-            self.time_stats["ran_lt_1e-1"] = runtime
-            self.iter_stats["ran_lt_1e-1"] = i
-        if max_range < 0.01 and "ran_lt_1e-2" not in self.time_stats:
-            self.time_stats["ran_lt_1e-2"] = runtime
-            self.iter_stats["ran_lt_1e-2"] = i
-        if max_range < 0.001 and "ran_lt_1e-3" not in self.time_stats:
-            self.time_stats["ran_lt_1e-3"] = runtime
-            self.iter_stats["ran_lt_1e-3"] = i
+        ref_val = jnp.mean(jnp.abs(ub + lb) / 2)
+        norm_max_range = max_range / ref_val
+        if norm_max_range < 0.1 and "norm_max_ran_10percent" not in self.time_stats:
+            self.time_stats["norm_max_ran_10percent"] = runtime
+            self.iter_stats["norm_max_ran_10percent"] = i
+        if norm_max_range < 0.01 and "norm_max_ran_1percent" not in self.time_stats:
+            self.time_stats["norm_max_ran_1percent"] = runtime
+            self.iter_stats["norm_max_ran_1percent"] = i
+        if norm_max_range < 0.001 and "norm_max_ran_1e-1percent" not in self.time_stats:
+            self.time_stats["norm_max_ran_1e-1percent"] = runtime
+            self.iter_stats["norm_max_ran_1e-1percent"] = i
+        if norm_max_range < 0.0001 and "norm_max_ran_1e-2percent" not in self.time_stats:
+            self.time_stats["norm_max_ran_1e-2percent"] = runtime
+            self.iter_stats["norm_max_ran_1e-2percent"] = i
+
+        norm_min_range = min_range / ref_val
+        if norm_min_range < 0.1 and "norm_min_ran_10percent" not in self.time_stats:
+            self.time_stats["norm_min_ran_10percent"] = runtime
+            self.iter_stats["norm_min_ran_10percent"] = i
+        if norm_min_range < 0.01 and "norm_min_ran_1percent" not in self.time_stats:
+            self.time_stats["norm_min_ran_1percent"] = runtime
+            self.iter_stats["norm_min_ran_1percent"] = i
+        if norm_min_range < 0.001 and "norm_min_ran_1e-1percent" not in self.time_stats:
+            self.time_stats["norm_min_ran_1e-1percent"] = runtime
+            self.iter_stats["norm_min_ran_1e-1percent"] = i
+        if norm_min_range < 0.0001 and "norm_min_ran_1e-2percent" not in self.time_stats:
+            self.time_stats["norm_min_ran_1e-2percent"] = runtime
+            self.iter_stats["norm_min_ran_1e-2percent"] = i
 
         return runtime

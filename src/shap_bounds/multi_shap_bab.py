@@ -164,7 +164,6 @@ def multi_shap_bab(
             batch_size=batch_size,
             jit=jit,
         )
-    timer = Timer()
     start_time = perf_counter()
 
     data_axes = tuple(range(1, base_mask.ndim + 1))
@@ -508,30 +507,26 @@ def multi_shap_bab(
         ):
             break
 
-        with timer["pop"]:
-            batch = branches.pop()
-        with timer["bab_step"]:
-            (
-                new_branches,
-                priority,
-                ((old_shap_lbs, old_shap_ubs), (new_shap_lbs, new_shap_ubs)),
-                (single_coalition, tight_bounds, invalid_bounds),
-            ) = bab_step(batch)
+        batch = branches.pop()
+        (
+            new_branches,
+            priority,
+            ((old_shap_lbs, old_shap_ubs), (new_shap_lbs, new_shap_ubs)),
+            (single_coalition, tight_bounds, invalid_bounds),
+        ) = bab_step(batch)
 
-        with timer["update_shap_bounds"]:
-            shap_lbs = shap_lbs - old_shap_lbs + new_shap_lbs
-            shap_ubs = shap_ubs - old_shap_ubs + new_shap_ubs
+        shap_lbs = shap_lbs - old_shap_lbs + new_shap_lbs
+        shap_ubs = shap_ubs - old_shap_ubs + new_shap_ubs
         yield Box(shap_lbs.squeeze(), shap_ubs.squeeze())
 
-        with timer["insert_branches"]:
-            if isinstance(branches, PriorityBranchStore):
-                branches.insert(priority, new_branches)
-                # drops pruned branches if they fill a batch
-                branches.drop(max_priority=-float("inf"))
-            else:
-                # shap bounds from the pruned branches remain part of the global bounds
-                pruned = drop_pruned(new_branches)
-                branches.insert(pruned)
+        if isinstance(branches, PriorityBranchStore):
+            branches.insert(priority, new_branches)
+            # drops pruned branches if they fill a batch
+            branches.drop(max_priority=-float("inf"))
+        else:
+            # shap bounds from the pruned branches remain part of the global bounds
+            pruned = drop_pruned(new_branches)
+            branches.insert(pruned)
 
         num_fully_split = single_coalition.sum().item()
         num_tight = (tight_bounds & ~single_coalition).sum().item()
@@ -570,7 +565,7 @@ def multi_shap_bab(
             total_branches = total_tight_bounds + total_fully_split
             log.log_stats(
                 "multi_shap_bab",
-                {"runtimes": timer.runtimes, "iterations": i},
+                {"iterations": i},
                 temporary=True,
                 total_branches=total_branches,
                 total_tight_bounds=total_tight_bounds,
@@ -582,7 +577,7 @@ def multi_shap_bab(
     if log is not False:
         log.log_stats(
             "multi_shap_bab",
-            {"runtimes": timer.runtimes, "iterations": i},
+            {"iterations": i},
             total_branches=total_branches,
             total_tight_bounds=total_tight_bounds,
             total_fully_split=total_fully_split,
