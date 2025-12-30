@@ -16,7 +16,7 @@ if [ -z ${TIMESTAMP+x} ];
 then
   TIMESTAMP="$(date -u +%Y-%m-%d_%H-%M-%S)"
 fi
-EXPERIMENT_DIR = "${network_name}_${TIMESTAMP}"
+EXPERIMENT_DIR="${network_name}_${TIMESTAMP}"
 
 
 WARMUP_SIZE=$((SIZE - 15))
