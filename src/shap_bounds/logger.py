@@ -123,8 +123,8 @@ class FileLogger(Logger):
     ):
         stats = stats2 if stats1 is None else stats1 | stats2
         if function_name not in self.iter_stats:
-            self.iter_stats[function_name] = {}
-        self.iter_stats[function_name][i] = stats
+            self.iter_stats[function_name] = []
+        self.iter_stats[function_name].append({"iteration": i} | stats)
 
     def log_bounds(
         self,
@@ -155,8 +155,9 @@ class FileLogger(Logger):
         print(f"Overall run statistics saved to {stats_file}.")
 
         for function_name, iter_stats in self.iter_stats.items():
-            iter_stats_file = self.directory / f"{function_name}_iter_stats.yaml"
-            yaml.dump(iter_stats, iter_stats_file)
+            iter_stats_file = self.directory / f"{function_name}_iter_stats.feather"
+            iter_stats = pd.DataFrame(iter_stats)
+            iter_stats.to_feather(iter_stats_file, compression="zstd", compression_level=9)
             print(f"{function_name} iteration statistics saved to {iter_stats_file}.")
 
         for function_name, bounds in self.bounds.items():
@@ -175,8 +176,8 @@ class FileLogger(Logger):
 
             bounds["runtime"] = self.bound_runtimes[function_name]
 
-            out_file = self.directory / f"{function_name}_bounds.csv"
-            bounds.to_csv(out_file, index=False)
+            out_file = self.directory / f"{function_name}_bounds.feather"
+            bounds.to_feather(out_file, compression="zstd", compression_level=9)
             print(f"{function_name} bounds saved to {out_file}.")
 
     def __enter__(self):
