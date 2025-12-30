@@ -45,24 +45,28 @@ class BoundStats:
             self.time_stats["smallest_shap"] = runtime
             self.iter_stats["smallest_shap"] = i
 
+        if (lb >= 0).any() and "some_pos" not in self.time_stats:
+            self.time_stats["some_pos"] = runtime
+            self.iter_stats["some_pos"] = i
+        if (ub <= 0).any() and "some_neg" not in self.time_stats:
+            self.time_stats["some_neg"] = runtime
+            self.iter_stats["some_neg"] = i
+
         max_range = jnp.max(ub - lb).item()
-        if max_range < 1.0 and "max_range_less_than_1" not in self.time_stats:
-            self.time_stats["max_range_less_than_1"] = runtime
-            self.iter_stats["max_range_less_than_1"] = i
-        if max_range < 0.01 and "max_range_less_than_0.01" not in self.time_stats:
-            self.time_stats["max_range_less_than_0.01"] = runtime
-            self.iter_stats["max_range_less_than_0.01"] = i
-        if max_range < 0.001 and "max_range_less_than_0.001" not in self.time_stats:
-            self.time_stats["max_range_less_than_0.001"] = runtime
-            self.iter_stats["max_range_less_than_0.001"] = i
-        if max_range < 0.0001 and "max_range_less_than_0.0001" not in self.time_stats:
-            self.time_stats["max_range_less_than_0.0001"] = runtime
-            self.iter_stats["max_range_less_than_0.0001"] = i
-        if max_range < 0.00001 and "max_range_less_than_0.00001" not in self.time_stats:
-            self.time_stats["max_range_less_than_0.00001"] = runtime
-            self.iter_stats["max_range_less_than_0.00001"] = i
-        if max_range < 0.000001 and "max_range_less_than_0.000001" not in self.time_stats:
-            self.time_stats["max_range_less_than_0.000001"] = runtime
-            self.iter_stats["max_range_less_than_0.000001"] = i
+
+        print("Max range:", max_range)
+
+        if max_range < 1.0 and "ran_lt_1e0" not in self.time_stats:
+            self.time_stats["ran_lt_1e0"] = runtime
+            self.iter_stats["ran_lt_1e0"] = i
+        if max_range < 0.1 and "ran_lt_1e-1" not in self.time_stats:
+            self.time_stats["ran_lt_1e-1"] = runtime
+            self.iter_stats["ran_lt_1e-1"] = i
+        if max_range < 0.01 and "ran_lt_1e-2" not in self.time_stats:
+            self.time_stats["ran_lt_1e-2"] = runtime
+            self.iter_stats["ran_lt_1e-2"] = i
+        if max_range < 0.001 and "ran_lt_1e-3" not in self.time_stats:
+            self.time_stats["ran_lt_1e-3"] = runtime
+            self.iter_stats["ran_lt_1e-3"] = i
 
         return runtime
