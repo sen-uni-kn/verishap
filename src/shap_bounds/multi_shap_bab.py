@@ -348,7 +348,7 @@ def multi_shap_bab(
             sum_coaliw_with_i * value_lb * with_i
             + sum_coaliw * value_lb * both
             - sum_coaliw * value_ub * both
-            - sum_coaliw_without_i * value_lb * without_i
+            - sum_coaliw_without_i * value_ub * without_i
         )
         shap_ub = (
             sum_coaliw_with_i * value_ub * with_i
