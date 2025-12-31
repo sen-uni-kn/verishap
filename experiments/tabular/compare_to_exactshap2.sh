@@ -1,10 +1,7 @@
 #!/bin/bash
-
 HERE="$(dirname "$0")"
-TIMEOUT=900  # 15min
-HARD_TIMEOUT=1100  # +200 seconds for setup, saving results, etc
-BAB_WARMUP_TIMEOUT=300  # 5min for downloading data and JAX compilation
-EXACTSHAP_WARMUP_TIMEOUT=60
+TIMEOUT=1800  # 15min
+HARD_TIMEOUT=2000  # +200 seconds for setup, saving results, etc
 
 BATCH_SIZE=4096
 NETWORK="$1"
@@ -16,71 +13,70 @@ if [ -z ${TIMESTAMP+x} ];
 then
   TIMESTAMP="$(date -u +%Y-%m-%d_%H-%M-%S)"
 fi
-EXPERIMENT_DIR="${network_name}_${TIMESTAMP}"
+EXPERIMENT_DIR="$HERE/output/compare_to_exactshap2/${network_name}_${TIMESTAMP}"
 
 
-WARMUP_SIZE=$((SIZE - 15))
-printf "\n\nRunning Warmup for ExactSHAP excluding ${WARMUP_SIZE} features...\n"
+WARMUP_SIZE=13
+printf "================================================================================\n"
+printf "Running Warmup for ExactSHAP with ${WARMUP_SIZE} effective features...\n"
+printf "================================================================================\n"
 
-OUT_DIR="$HERE/output/compare_to_exactshap/${EXPERIMENT_DIR}/warmup/ExactSHAP/"
+OUT_DIR="${EXPERIMENT_DIR}/warmup/ExactSHAP/"
 mkdir -p "$OUT_DIR"
-timeout "$EXACTSHAP_WARMUP_TIMEOUT" \
-  python -m experiments.tabular.exact_shap \
-    --model "${NETWORK}" \
-    --set-to-baseline ${WARMUP_SIZE} \
-    --input 0 --output-feature 0 \
-    --shap-variant "zero-baseline" \
-    --out "$OUT_DIR" \
+python -m experiments.tabular.exact_shap \
+  --model "${NETWORK}" \
+  --effective-features ${WARMUP_SIZE} \
+  --input 0 --output-feature 0 \
+  --shap-variant "zero-baseline" \
+  --out "$OUT_DIR" \
 
 sleep 15s
-printf "\n\nRunning Warmup for Branch and Bound excluding ${WARMUP_SIZE} features...\n"
+printf "================================================================================\n"
+printf "Running Warmup for Branch and Bound with ${WARMUP_SIZE} effective features...\n"
+printf "================================================================================\n"
 
-OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/warmup/BaB/${network_name}"
+OUT_DIR="${EXPERIMENT_DIR}/warmup/BaB/"
 mkdir -p "$OUT_DIR"
-timeout "$BAB_WARMUP_TIMEOUT" \
-  python -m experiments.tabular.bound \
-    --model "${NETWORK}" \
-    --set-to-baseline ${WARMUP_SIZE} \
-    --input 0 --output-feature 0 \
-    --shap-variant "zero-baseline" \
-    --bound-method "bab" \
-    --bound-options "batch_size=$BATCH_SIZE" \
-    --out "$OUT_DIR" \
-    --max-iters 2 \
-    --timeout "$BAB_WARMUP_TIMEOUT"
+python -m experiments.tabular.bound \
+  --model "${NETWORK}" \
+  --effective-features ${WARMUP_SIZE} \
+  --input 0 --output-feature 0 \
+  --shap-variant "zero-baseline" \
+  --bound-method "bab" \
+  --bound-options "batch_size=$BATCH_SIZE" \
+  --out "$OUT_DIR" \
+  --max-iters 2 \
 
-RUN_EXACTSHAP=true  # stop running ExactSHAP after it times out once
-for ((i=$(($SIZE - 10)); i>=0; i--)); do
-  if [ "$RUN_EXACTSHAP" = true ]; then
+for ((i=10; i<=SIZE; i++)); do
+  if [ $i -le 28 ]; then  # values above 28 cause crashes
     sleep 15s
-    printf "\n\nRunning ExactSHAP excluding ${i} features...\n"
+    printf "================================================================================\n"
+    printf "Running ExactSHAP with ${i} effective features...\n"
+    printf "================================================================================\n"
 
-    OUT_DIR="$HERE/output/compare_to_exactshap/${EXPERIMENT_DIR}/ExactSHAP/${i}"
+    OUT_DIR="${EXPERIMENT_DIR}/ExactSHAP/${i}"
     mkdir -p "$OUT_DIR"
     timeout --kill-after=60 "$TIMEOUT" \
       python -m experiments.tabular.exact_shap \
         --model "${NETWORK}" \
-        --set-to-baseline $i \
+        --effective-features $i \
         --input 0 --output-feature 0 \
         --shap-variant "zero-baseline" \
         --out "$OUT_DIR" \
         --silent
-    
-    retVal=$?
-    if [ $retVal -eq 124 ]; then  # timeout returns 124 if the timeout is reached
-      RUN_EXACTSHAP=false
-    fi
   fi
 
   sleep 15s
-  printf "\n\nRunning Branch and Bound excluding ${i} features...\n"
+  printf "================================================================================\n"
+  printf "Running Branch and Bound with ${i} effective features...\n"
+  printf "================================================================================\n"
 
-  OUT_DIR="$HERE/output/compare_to_exactshap/${EXPERIMENT_DIR}/BaB/${i}"
+  OUT_DIR="${EXPERIMENT_DIR}/BaB/${i}"
   mkdir -p "$OUT_DIR"
   timeout --kill-after=60 "$HARD_TIMEOUT" \
     python -m experiments.tabular.bound \
       --model "${NETWORK}" \
-      --set-to-baseline $i \
+      --effective-features $i \
       --input 0 --output-feature 0 \
       --shap-variant "zero-baseline" \
       --bound-method "bab" \

@@ -135,10 +135,11 @@ class CmdArgs:
             help="The index of the input sample to analyse in the dataset.",
         )
         self.parser.add_argument(
-            "--set-to-baseline",
+            "--effective-features",
             type=int,
-            default=0,
-            help="How many features to set to the baseline value. "
+            default=None,
+            help="The number of effective features to maintain of the input sample. "
+            "The remaining features are set to the baseline. "
             "Only available for baseline SHAP variants.",
         )
         return self
@@ -417,15 +418,17 @@ class CmdArgs:
         return None
 
     @property
-    def raw_sample(self) -> np.ndarray:
+    def raw_sample(self) -> jax.Array:
         return jnp.asarray(self.data[self.args.input])
 
     @property
-    def sample(self) -> np.ndarray:
+    def sample(self) -> jax.Array:
         x = self.raw_sample
-        if self.args.set_to_baseline > 0:
-            baseline = self.baseline[: self.args.set_to_baseline]
-            x = x.at[: self.args.set_to_baseline].set(baseline)
+        if self.args.effective_features is not None:
+            keep = self.args.effective_features
+            baseline_ = jnp.ravel(self.baseline)[keep:]
+            x_ = jnp.ravel(x).at[keep:].set(baseline_)
+            x = x_.reshape(x.shape)
         return x
 
     @property
