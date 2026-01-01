@@ -47,7 +47,7 @@ python -m experiments.tabular.bound \
   --max-iters 2
 
 for ((i=10; i<=MAX_SIZE; i++)); do
-  if [ $i -le 28 ]; then  # values above 28 cause crashes
+  if [ $i -le 26 ]; then  # values above 26 cause crashes
     sleep 15s
     printf "================================================================================\n"
     printf "Running ExactSHAP with ${i} effective features...\n"
