@@ -1,11 +1,10 @@
 #!/bin/bash
 HERE="$(dirname "$0")"
-TIMEOUT=1800  # 15min
-HARD_TIMEOUT=2000  # +200 seconds for setup, saving results, etc
+TIMEOUT=900  # 15min
 
 BATCH_SIZE=4096
 NETWORK="$1"
-SIZE="$2"
+MAX_SIZE="$2"
 network_filename=$(basename "$NETWORK")
 network_name="${network_filename%.*}"
 
@@ -28,7 +27,7 @@ python -m experiments.tabular.exact_shap \
   --effective-features ${WARMUP_SIZE} \
   --input 0 --output-feature 0 \
   --shap-variant "zero-baseline" \
-  --out "$OUT_DIR" \
+  --out "$OUT_DIR"
 
 sleep 15s
 printf "================================================================================\n"
@@ -45,9 +44,9 @@ python -m experiments.tabular.bound \
   --bound-method "bab" \
   --bound-options "batch_size=$BATCH_SIZE" \
   --out "$OUT_DIR" \
-  --max-iters 2 \
+  --max-iters 2
 
-for ((i=10; i<=SIZE; i++)); do
+for ((i=10; i<=MAX_SIZE; i++)); do
   if [ $i -le 28 ]; then  # values above 28 cause crashes
     sleep 15s
     printf "================================================================================\n"
@@ -56,7 +55,7 @@ for ((i=10; i<=SIZE; i++)); do
 
     OUT_DIR="${EXPERIMENT_DIR}/ExactSHAP/${i}"
     mkdir -p "$OUT_DIR"
-    timeout --kill-after=60 "$TIMEOUT" \
+    timeout "$TIMEOUT" \
       python -m experiments.tabular.exact_shap \
         --model "${NETWORK}" \
         --effective-features $i \
@@ -73,17 +72,16 @@ for ((i=10; i<=SIZE; i++)); do
 
   OUT_DIR="${EXPERIMENT_DIR}/BaB/${i}"
   mkdir -p "$OUT_DIR"
-  timeout --kill-after=60 "$HARD_TIMEOUT" \
-    python -m experiments.tabular.bound \
-      --model "${NETWORK}" \
-      --effective-features $i \
-      --input 0 --output-feature 0 \
-      --shap-variant "zero-baseline" \
-      --bound-method "bab" \
-      --bound-options "batch_size=$BATCH_SIZE" \
-      --out "$OUT_DIR" \
-      --timeout "$TIMEOUT" \
-      --silent
+  python -m experiments.tabular.bound \
+    --model "${NETWORK}" \
+    --effective-features $i \
+    --input 0 --output-feature 0 \
+    --shap-variant "zero-baseline" \
+    --bound-method "bab" \
+    --bound-options "batch_size=$BATCH_SIZE" \
+    --out "$OUT_DIR" \
+    --timeout "$TIMEOUT" --max-iters 10000 \
+    --silent
 done
 
 printf "Experiment complete.\n"

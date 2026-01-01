@@ -3,7 +3,6 @@ import itertools as it
 from pathlib import Path
 
 from shap_bounds.logger import ConsoleLogger, FileLogger, JoinLoggers
-from shap_bounds.timer import Timer
 
 from ..boundstats import BoundStats
 from ..runstats import machine_and_code_details
@@ -28,7 +27,6 @@ if __name__ == "__main__":
     in_feature = args.feature
 
     loggers = [] if args.silent else [ConsoleLogger()]
-    timer = Timer()
     time_stats = {}
     iter_stats = {}
 
@@ -49,9 +47,15 @@ if __name__ == "__main__":
                     time_stats["timeout"] = True
                     iter_stats["timeout"] = i
                     break
+            else:
+                print("Maximum number of iterations reached.")
+                time_stats["max_iters"] = True
+                iter_stats["max_iters"] = i
 
         if "timeout" not in time_stats and args.timeout is not None:
             time_stats["timeout"] = False
+        if "max_iters" not in time_stats and args.max_iters is not None:
+            time_stats["max_iters"] = False
 
         time_stats["overall"] = bound_stats.runtime
         logger.log_stats(

@@ -88,32 +88,30 @@ for network in "${NETWORKS[@]}"; do
 
   OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/warmup/BaB/${network_name}"
   mkdir -p "$OUT_DIR"
-  timeout "$BAB_WARMUP_TIMEOUT" \
-    python -m experiments.tabular.bound \
-      --model "experiments/resources/${network}" \
-      --input 0 --output-feature 0 \
-      --shap-variant "zero-baseline" \
-      --bound-method "bab" \
-      --bound-options "batch_size=$BATCH_SIZE" \
-      --out "$OUT_DIR" \
-      --max-iters 2 \
-      --timeout "$BAB_WARMUP_TIMEOUT"
+  python -m experiments.tabular.bound \
+    --model "experiments/resources/${network}" \
+    --input 0 --output-feature 0 \
+    --shap-variant "zero-baseline" \
+    --bound-method "bab" \
+    --bound-options "batch_size=$BATCH_SIZE" \
+    --out "$OUT_DIR" \
+    --max-iters 2 \
+    --timeout "$BAB_WARMUP_TIMEOUT"
 
   sleep 15s
   printf "\n\nRunning Branch and Bound on ${network}...\n"
 
   OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/BaB/${network_name}"
   mkdir -p "$OUT_DIR"
-  timeout "$HARD_TIMEOUT" \
-    python -m experiments.tabular.bound \
-      --model "experiments/resources/${network}" \
-      --input 0 --output-feature 0 \
-      --shap-variant "zero-baseline" \
-      --bound-method "bab" \
-      --bound-options "batch_size=$BATCH_SIZE" \
-      --out "$OUT_DIR" \
-      --timeout "$TIMEOUT" \
-      --silent
+  python -m experiments.tabular.bound \
+    --model "experiments/resources/${network}" \
+    --input 0 --output-feature 0 \
+    --shap-variant "zero-baseline" \
+    --bound-method "bab" \
+    --bound-options "batch_size=$BATCH_SIZE" \
+    --out "$OUT_DIR" \
+    --timeout "$TIMEOUT" \
+    --silent
   sleep 15s
 done
 
