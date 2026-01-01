@@ -29,6 +29,15 @@ class VisionPatchesCmdArgs(CmdArgs):
         )
         return self
 
+    def logger_args(self) -> "VisionPatchesCmdArgs":
+        super().logger_args()
+        self.parser.add_argument(
+            "--overlay-logger",
+            action="store_true",
+            help="Enable overlay logging for vision patches bounds.",
+        )
+        return self
+
     # =========================================================================
 
     @property
@@ -91,3 +100,7 @@ class VisionPatchesCmdArgs(CmdArgs):
             return jnp.ones(total_patches, dtype=jnp.float32)
         else:
             return jnp.ones_like(self.sample)
+
+    @property
+    def overlay_logger(self) -> bool:
+        return self.args.overlay_logger

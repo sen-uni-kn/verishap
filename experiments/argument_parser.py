@@ -1,12 +1,12 @@
 # Copyright 2025 David Boetius
-"""Utilities for parsing command line arguments."""
+"""Parsing command line arguments."""
 
 import argparse
 from collections.abc import Iterable, Iterator
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 import equinox as eqx
 import jax
@@ -447,9 +447,9 @@ class CmdArgs:
     def baseline(self) -> jax.Array | None:
         x = self.raw_sample
         match self.shap_variant:
-            case "zero-baseline":
+            case "zero-baseline" | "superfeature-zero-baseline":
                 return jnp.zeros_like(x)
-            case "mean-baseline":
+            case "mean-baseline" | "superfeature-mean-baseline":
                 return self.data_mean.reshape(x.shape)
             case _:
                 return None

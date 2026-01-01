@@ -39,6 +39,9 @@ experiments = [
     "py-cpuinfo==9.0.0",
     "GPUtil==1.4.0",
     "PyQT6==6.10.1",
+    "matplotlib==3.10.7",
+    "seaborn==0.13.2",
+    "cmcrameri==1.9.0",
 ]
 test = ["pytest==9.0.1"]
 extra = ["jupyter==1.1.1","tqdm==4.67.1"]
