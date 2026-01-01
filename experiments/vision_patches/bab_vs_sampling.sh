@@ -33,25 +33,41 @@ for estimator in "PermutationSHAP" "LeverageSHAP"; do
 done
 
 for estimator in "PermutationSHAP" "LeverageSHAP"; do
-    for seed in 0 1 2 3 4 5 6 7 8 9; do
-        sleep 15s
+    for seed in $(seq 0 10); do
+        sleep 5s
         printf "================================================================================\n"
         printf "Running ${estimator} with seed ${seed}\n"
         printf "================================================================================\n"
         
-        OUT_DIR="${EXPERIMENT_DIR}/${estimator}/seed_${seed}/"
+        # Sampling in individual calls to have the time required for jitting in each call
+        # for a fair comparison with BaB, which also includes the jitting overhead.
+        OUT_DIR="${EXPERIMENT_DIR}/${estimator}/seed_${seed}/1000"
         mkdir -p "$OUT_DIR"
-        # Not silencing this call, since there is no logging during sampling anyways.
         python -m experiments.vision_patches.estimate \
-        --model "${NETWORK}" \
-        --num-patches "${NUM_PATCHES}" \
-        --input 0 --output-feature 0 \
-        --shap-variant "zero-baseline" \
-        --estimator "${estimator}" \
-        --out "$OUT_DIR" \
-        --num-samples "200,1000,10000,100000" \
-        --seed "${seed}"
-        # --num-samples "200,1000,10000,100000,1000000,10000000" \
+          --model "${NETWORK}" \
+          --num-patches "${NUM_PATCHES}" \
+          --input 0 --output-feature 0 \
+          --shap-variant "zero-baseline" \
+          --estimator "${estimator}" \
+          --out "$OUT_DIR" \
+          --num-samples "1000" \
+          --seed "${seed}" \
+          --silent
+
+        for num_samples in $(seq 10000 10000 130000); do
+          OUT_DIR="${EXPERIMENT_DIR}/${estimator}/seed_${seed}/${num_samples}"
+          mkdir -p "$OUT_DIR"
+          python -m experiments.vision_patches.estimate \
+            --model "${NETWORK}" \
+            --num-patches "${NUM_PATCHES}" \
+            --input 0 --output-feature 0 \
+            --shap-variant "zero-baseline" \
+            --estimator "${estimator}" \
+            --out "$OUT_DIR" \
+            --num-samples "${num_samples}" \
+            --seed "${seed}" \
+            --silent
+        done
     done
 done
 
