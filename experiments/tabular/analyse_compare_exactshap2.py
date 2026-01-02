@@ -4,8 +4,56 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Iterable
 
+import numpy as np
 import pandas as pd
 import yaml
+
+
+def _get_runtime_at(condition: np.ndarray, iter_times: np.ndarray) -> float | None:
+    idx = np.where(condition)[0]
+    if len(idx) == 0:
+        return None
+    return iter_times[idx[0]]
+
+
+def _load_bab_runtimes(info_path: Path) -> dict:
+    bounds_path = info_path.parent / "multi_shap_bab_bounds.feather"
+    if not bounds_path.exists():
+        return {}
+    bounds = pd.read_feather(bounds_path)
+
+    with info_path.open("r") as f:
+        info = yaml.safe_load(f)
+    num_features = len(info["config"]["multi_shap_bab"]["features"])
+    max_iters = info["config"]["cmd_args"].get("max_iters", None)
+
+    iter_times = bounds["runtime"]
+    lbs = np.array([bounds[(f"{i}", "lb")] for i in range(num_features)]).T
+    ubs = np.array([bounds[(f"{i}", "ub")] for i in range(num_features)]).T
+
+    lb_vs_each_ub = np.expand_dims(lbs, -1) >= np.expand_dims(ubs, -2)
+    some_separated = lb_vs_each_ub.any(axis=(-1, -2))
+    some_separated_time = _get_runtime_at(some_separated, iter_times)
+
+    ref_vals = np.max(np.abs((lbs + ubs) / 2), axis=-1)
+    ranges_norm = ((ubs - lbs) / 2) / ref_vals.reshape(-1, 1)
+    max_norm_ranges = ranges_norm.max(axis=-1)
+    max_norm_ran_lt_10percent = _get_runtime_at(max_norm_ranges <= 0.1, iter_times)
+    max_norm_ran_lt_1percent = _get_runtime_at(max_norm_ranges <= 0.01, iter_times)
+    max_norm_ran_lt_1permille = _get_runtime_at(max_norm_ranges <= 0.001, iter_times)
+
+    exact_bounds = None
+    if max_iters is not None:
+        if int(max_iters) - 1 > len(iter_times):
+            exact_bounds = iter_times.iloc[-1]
+
+    return {
+        "exact_bounds": exact_bounds,
+        "some_separated": some_separated_time,
+        "max_norm_ran_lt_10percent": max_norm_ran_lt_10percent,
+        "max_norm_ran_lt_1percent": max_norm_ran_lt_1percent,
+        "max_norm_ran_lt_1permille": max_norm_ran_lt_1permille,
+    }
 
 
 def _load_bab_run(info_path: Path) -> dict | None:
@@ -15,13 +63,8 @@ def _load_bab_run(info_path: Path) -> dict | None:
     print("Loading", info_path)
     effective_features = int(info_path.parent.name)
 
-    timeout = info.get("overall", {}).get("runtime", {}).get("timeout", True)
-    rts = info.get("overall", {}).get("runtime", {})
-
-    if timeout:
-        rts["overall"] = 1800
-
-    return {"effective_features": effective_features, "timeout": timeout, **rts}
+    runtimes = _load_bab_runtimes(info_path)
+    return {"effective_features": effective_features, **runtimes}
 
 
 def _load_exactshap_run(info_path: Path) -> dict | None:
@@ -53,9 +96,8 @@ def main(data_dir: Path) -> None:
     for run in bab_runs:
         dim = run["effective_features"]
         data[dim]["input_dim"] = dim
-        data[dim]["bab_timeout"] = run["timeout"]
         for key, value in run.items():
-            if key != "effective_features" and key != "timeout":
+            if key != "effective_features":
                 data[dim][f"bab_{key}"] = value
     for run in exactshap_runs:
         dim = run["effective_features"]
