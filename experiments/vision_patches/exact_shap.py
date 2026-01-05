@@ -7,7 +7,7 @@ from shap_bounds.logger import ConsoleLogger, FileLogger, JoinLoggers
 from shap_bounds.timer import Timer
 
 from ..runstats import machine_and_code_details
-from .argument_parser import TabularCmdArgs
+from .argument_parser import VisionPatchesCmdArgs
 
 local_resoure_dir = Path(__file__).parent / "resources"
 local_output_dir = Path(__file__).parent / "output"
@@ -15,9 +15,10 @@ local_output_dir = Path(__file__).parent / "output"
 
 if __name__ == "__main__":
     args = (
-        TabularCmdArgs()
-        .model_args(local_resoure_dir)
+        VisionPatchesCmdArgs()
+        .model_args()
         .dataset_args()
+        .segmentation_args()
         .feature_args()
         .shap_variant_args()
         .logger_args()

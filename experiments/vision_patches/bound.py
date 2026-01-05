@@ -49,6 +49,7 @@ if __name__ == "__main__":
         logger = JoinLoggers(*logger_parts)
         logger.log_config("run_details", runstats.machine_and_code_details())
         logger.log_config("cmd_args", args.all_arguments)
+        logger.log_config("further_stats", args.further_run_stats)
 
         bounds_iter = args.bound_method(logger)()
         iters = it.count()

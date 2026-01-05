@@ -660,3 +660,31 @@ class CmdArgs:
     @property
     def silent(self) -> bool:
         return self.args.silent
+
+    # =========================================================================
+
+    @property
+    def effective_features(self) -> int | None:
+        """The actual number of features that are different from the baseline."""
+        x, baseline = self.sample, self.baseline
+        match self.shap_variant:
+            case "zero-baseline" | "mean-baseline":
+                return jnp.sum(x != baseline).item()
+            case "superfeature-zero-baseline" | "superfeature-mean-baseline":
+                in_dims = tuple(range(-x.ndim, 0))
+                return ((x != baseline) | ~self.masks).all(axis=in_dims).sum().item()
+            case _:
+                return None
+
+    @property
+    def model_output(self) -> jax.Array:
+        x = jnp.expand_dims(self.sample, axis=0)
+        return self.model(x)[..., self.output_feature]
+
+    @property
+    def further_run_stats(self) -> dict:
+        """Additional statistics for logging."""
+        stats = {"model_output": self.model_output.item()}
+        if (effective_features := self.effective_features) is not None:
+            stats["num_non_baseline_features"] = effective_features
+        return stats

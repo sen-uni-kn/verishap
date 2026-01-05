@@ -37,6 +37,7 @@ if __name__ == "__main__":
         logger = JoinLoggers(*loggers, file_logger)
         logger.log_config("run_details", machine_and_code_details())
         logger.log_config("cmd_args", args.all_arguments)
+        logger.log_config("further_stats", args.further_run_stats)
 
         for n in tqdm(num_samples, disable=args.silent):
             with timer["estimate"] as timer_context:
