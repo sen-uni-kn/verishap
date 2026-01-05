@@ -9,14 +9,14 @@ import seaborn as sns
 from matplotlib import pyplot as plt
 
 
-def _load_sampling_runs(run_dir: Path, feature: int) -> pd.DataFrame:
+def _load_sampling_runs(run_dir: Path, estimator: str, feature: int) -> pd.DataFrame:
     records: list[dict] = []
-    for stats_path in run_dir.rglob("seed_*/estimate_iter_stats.feather"):
-        estimator = stats_path.parents[1].name
-        seed = stats_path.parent.name
+    for stats_path in (run_dir / estimator).rglob(
+        "seed_*/*/estimate_iter_stats.feather"
+    ):
+        num_samples = int(stats_path.parent.name)
+        seed = stats_path.parents[1].name
         df = pd.read_feather(stats_path)
-        if "iteration" not in df.columns:
-            raise ValueError(f"Missing iteration column in {stats_path}")
         if feature in df.columns:
             feature_col = feature
         elif str(feature) in df.columns:
@@ -28,7 +28,7 @@ def _load_sampling_runs(run_dir: Path, feature: int) -> pd.DataFrame:
                 {
                     "estimator": estimator,
                     "seed": seed,
-                    "num_samples": int(row["iteration"]),
+                    "num_samples": num_samples,
                     "importance": float(row[feature_col]),
                 }
             )
@@ -37,9 +37,7 @@ def _load_sampling_runs(run_dir: Path, feature: int) -> pd.DataFrame:
     return pd.DataFrame.from_records(records)
 
 
-def _aggregate_runs(
-    runs: pd.DataFrame, conf_level: float
-) -> pd.DataFrame:
+def _aggregate_runs(runs: pd.DataFrame, conf_level: float) -> pd.DataFrame:
     alpha = 1.0 - conf_level
     lower_q = alpha / 2.0
     upper_q = 1.0 - (alpha / 2.0)
@@ -86,9 +84,9 @@ def main(
     conf_level: float,
     bab_batch_size: int,
     out_name: str,
-    sampling_estimator: str | None,
+    sampling_estimator: str,
 ) -> None:
-    runs = _load_sampling_runs(run_dir, feature)
+    runs = _load_sampling_runs(run_dir, sampling_estimator, feature)
     summary = _aggregate_runs(runs, conf_level)
     sampling_summary = summary[summary["estimator"] != "BaB"]
     if sampling_estimator is not None:
@@ -213,7 +211,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--sampling-estimator",
         type=str,
-        default=None,
+        default="PermutationSHAP",
         help="If set, plot only this sampling estimator (e.g., KernelSHAP).",
     )
     args = parser.parse_args()

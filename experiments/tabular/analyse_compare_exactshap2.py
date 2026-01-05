@@ -31,7 +31,7 @@ def _load_bab_runtimes(info_path: Path) -> dict:
     lbs = np.array([bounds[(f"{i}", "lb")] for i in range(num_features)]).T
     ubs = np.array([bounds[(f"{i}", "ub")] for i in range(num_features)]).T
 
-    lb_vs_each_ub = np.expand_dims(lbs, -1) >= np.expand_dims(ubs, -2)
+    lb_vs_each_ub = np.expand_dims(lbs, -1) > np.expand_dims(ubs, -2)
     some_separated = lb_vs_each_ub.any(axis=(-1, -2))
     some_separated_time = _get_runtime_at(some_separated, iter_times)
 
