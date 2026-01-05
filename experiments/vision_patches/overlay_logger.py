@@ -4,14 +4,26 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
+import colour
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
+import skimage.color
 from matplotlib import colormaps, colors
 from matplotlib import pyplot as plt
+from tqdm import tqdm
 
 from shap_bounds.logger import Logger
+
+
+def adapt_luminance(color, luminance_multiplier):
+    color_xyz = skimage.color.rgb2xyz(color[..., :3])
+    color_oklab = colour.XYZ_to_Oklab(color_xyz)
+    color_oklab[..., 0] = color_oklab[..., 0] * luminance_multiplier
+    color_xyz = colour.Oklab_to_XYZ(color_oklab)
+    color_rgb = skimage.color.xyz2rgb(color_xyz)
+    return np.concatenate([color_rgb, color[..., 3:]], axis=-1)
 
 
 class VisionPatchesBoundsLogger(Logger):
@@ -26,6 +38,7 @@ class VisionPatchesBoundsLogger(Logger):
         dpi: int = 150,
         midpoint_scale_max_abs: float | None = None,
         range_scale_max_abs: float | None = None,
+        separate_colorbar: bool = False,
     ):
         self.sample = np.asarray(sample)
         self.num_patches = num_patches
@@ -39,18 +52,24 @@ class VisionPatchesBoundsLogger(Logger):
         self.dpi = dpi
 
         self.mask_idx = self._make_mask_idx()
-        self.cmap = self._load_colormap("berlin")
-        self.mid_cmap = self.cmap.reversed()
+        self.cmap = self._load_colormap("vik").reversed()
+        self.mid_cmap = self.cmap
         self.fig = None
         self.ax = None
         self.base_artist = None
         self.overlay_artist = None
-        self.mid_mappable = None
-        self.mid_colorbar = None
-        self.intensity_mappable = None
-        self.intensity_colorbar = None
+        self.combined_colorbar_ax = None
+        self.combined_colorbar_image = None
+        self.combined_colorbar_size = 256
         self.mid_norm = None
         self.range_max_abs = None
+        self.separate_colorbar = separate_colorbar
+        self._colorbar_fixed = (
+            midpoint_scale_max_abs is not None and range_scale_max_abs is not None
+        )
+        self._colorbar_saved = False
+        self._combined_colorbar_rgba = None
+        self._combined_colorbar_extent = None
         self.mid_scale_max_abs = (
             float(midpoint_scale_max_abs)
             if midpoint_scale_max_abs is not None and midpoint_scale_max_abs > 0
@@ -86,7 +105,26 @@ class VisionPatchesBoundsLogger(Logger):
             return
         if self.show:
             plt.ion()
-        self.fig, self.ax = plt.subplots(figsize=(7, 5), dpi=self.dpi)
+        base_figsize = (7.0, 5.0)
+        base_left = 0.02
+        base_right = 0.74
+        base_cb_left = 0.78
+        base_cb_width = 0.2
+        left_in = base_figsize[0] * base_left
+        main_width_in = base_figsize[0] * (base_right - base_left)
+        gap_in = base_figsize[0] * (base_cb_left - base_right)
+        cb_width_in = base_figsize[0] * base_cb_width * 2.0
+        right_in = base_figsize[0] * 0.02
+        fig_width = left_in + main_width_in + gap_in + cb_width_in + right_in
+        self._combined_colorbar_bounds = (
+            (left_in + main_width_in + gap_in) / fig_width,
+            0.13,
+            cb_width_in / fig_width,
+            0.85,
+        )
+        self.fig, self.ax = plt.subplots(
+            figsize=(fig_width, base_figsize[1]), dpi=self.dpi
+        )
         self.ax.set_axis_off()
         base_image = self._base_image()
         if base_image.ndim == 2:
@@ -96,7 +134,12 @@ class VisionPatchesBoundsLogger(Logger):
         overlay = np.zeros((*base_image.shape[:2], 4), dtype=np.float32)
         self.overlay_artist = self.ax.imshow(overlay)
         self._init_colorbars()
-        self.fig.subplots_adjust(right=0.74, left=0.02, top=0.98, bottom=0.02)
+        self.fig.subplots_adjust(
+            right=(left_in + main_width_in) / fig_width,
+            left=left_in / fig_width,
+            top=0.98,
+            bottom=0.02,
+        )
 
     def _base_image(self) -> np.ndarray:
         if self.sample.ndim == 3 and self.sample.shape[0] == 1:
@@ -107,22 +150,14 @@ class VisionPatchesBoundsLogger(Logger):
 
     def _init_colorbars(self):
         self.mid_norm = colors.Normalize(vmin=-1.0, vmax=1.0)
-        self.mid_mappable = plt.cm.ScalarMappable(
-            norm=self.mid_norm, cmap=self.mid_cmap
+        self.combined_colorbar_ax = self.fig.add_axes(self._combined_colorbar_bounds)
+        self.combined_colorbar_ax.set_xlabel("bounds range", labelpad=6)
+        self.combined_colorbar_ax.xaxis.set_label_coords(0.5, -0.08)
+        self.combined_colorbar_ax.set_ylabel("midpoint")
+        self.combined_colorbar_image = self.combined_colorbar_ax.imshow(
+            np.zeros((self.combined_colorbar_size, self.combined_colorbar_size, 4)),
+            origin="lower",
         )
-        self.intensity_mappable = plt.cm.ScalarMappable(
-            norm=colors.Normalize(vmin=0.0, vmax=1.0), cmap="gray_r"
-        )
-
-        mid_ax = self.fig.add_axes([0.8, 0.12, 0.03, 0.76])
-        intensity_ax = self.fig.add_axes([0.92, 0.12, 0.03, 0.76])
-        self.mid_colorbar = self.fig.colorbar(self.mid_mappable, cax=mid_ax)
-        self.intensity_colorbar = self.fig.colorbar(
-            self.intensity_mappable, cax=intensity_ax
-        )
-        self.intensity_colorbar.ax.invert_yaxis()
-        self.mid_colorbar.set_label("midpoint")
-        self.intensity_colorbar.set_label("bounds range")
 
     def _prepare_bounds(self, bounds: tuple) -> tuple[np.ndarray, np.ndarray]:
         lbs, ubs = bounds
@@ -157,8 +192,9 @@ class VisionPatchesBoundsLogger(Logger):
             intensity_map = intensity_map.mean(axis=0)
 
         self._update_mid_colorbar(max_abs_mid)
-        overlay = self.mid_cmap(self.mid_norm(mid_map))
-        overlay[..., 3] = self.base_alpha * np.clip(intensity_map, 0.0, 1.0)
+        mid_colors = self.mid_cmap(self.mid_norm(mid_map))
+        overlay = adapt_luminance(mid_colors, np.clip(intensity_map, 0.0, 1.0))
+        overlay[..., 3] = self.base_alpha
         return overlay
 
     def _update_mid_colorbar(self, max_abs_mid: float) -> None:
@@ -172,8 +208,7 @@ class VisionPatchesBoundsLogger(Logger):
             or self.mid_norm.vmax != max_abs_mid
         ):
             self.mid_norm = colors.Normalize(vmin=-max_abs_mid, vmax=max_abs_mid)
-            self.mid_mappable.set_norm(self.mid_norm)
-            self.mid_colorbar.update_normal(self.mid_mappable)
+        self._update_combined_colorbar(max_abs_mid)
 
     def _update_range_colorbar(self) -> None:
         if self.range_max_abs is None:
@@ -183,9 +218,59 @@ class VisionPatchesBoundsLogger(Logger):
                 if self.mid_scale_max_abs is None or self.mid_scale_max_abs <= 0:
                     self.mid_scale_max_abs = 1.0
                 self.range_max_abs = self.mid_scale_max_abs
-            range_norm = colors.Normalize(vmin=0.0, vmax=self.range_max_abs)
-            self.intensity_mappable.set_norm(range_norm)
-            self.intensity_colorbar.update_normal(self.intensity_mappable)
+        mid_max_abs = 1.0
+        if self.mid_norm is not None:
+            mid_max_abs = max(abs(self.mid_norm.vmin), abs(self.mid_norm.vmax))
+        self._update_combined_colorbar(mid_max_abs)
+
+    def _update_combined_colorbar(self, max_abs_mid: float) -> None:
+        if self.combined_colorbar_image is None:
+            return
+        if max_abs_mid <= 0:
+            max_abs_mid = 1.0
+        range_max_abs = self.range_max_abs if self.range_max_abs is not None else 1.0
+        if range_max_abs <= 0:
+            range_max_abs = 1.0
+        size = self.combined_colorbar_size
+        y_vals = np.linspace(-max_abs_mid, max_abs_mid, size)
+        x_vals = np.linspace(0.0, range_max_abs, size)
+        mid_colors = self.mid_cmap(self.mid_norm(y_vals))
+        intensity = 1.0 - np.clip(x_vals / range_max_abs, 0.0, 1.0)
+        mid_colors = np.tile(mid_colors[:, None, :3], (1, size, 1))
+        intensity = np.tile(intensity[None, :], (size, 1))
+        rgb = adapt_luminance(mid_colors, intensity)
+        # rgb = mid_colors[:, None, :3] * intensity[None, :, None]
+        alpha = np.ones((size, size, 1), dtype=rgb.dtype)
+        image = np.concatenate([rgb, alpha], axis=-1)
+        self.combined_colorbar_image.set_data(image)
+        self._combined_colorbar_rgba = image
+        self._combined_colorbar_extent = (0.0, range_max_abs, -max_abs_mid, max_abs_mid)
+        self.combined_colorbar_image.set_extent(self._combined_colorbar_extent)
+        self.combined_colorbar_ax.set_xlim(0.0, range_max_abs)
+        self.combined_colorbar_ax.set_ylim(-max_abs_mid, max_abs_mid)
+
+    def _save_main_image(self, out_file: Path) -> None:
+        if self.fig is None or self.ax is None:
+            return
+        bbox = self.ax.get_window_extent().transformed(
+            self.fig.dpi_scale_trans.inverted()
+        )
+        self.fig.savefig(out_file, dpi=self.dpi, bbox_inches=bbox, pad_inches=0.0)
+
+    def _save_colorbar_assets(self, base_path: Path) -> None:
+        if (
+            self._combined_colorbar_rgba is None
+            or self._combined_colorbar_extent is None
+        ):
+            return
+        if self._colorbar_fixed and self._colorbar_saved:
+            return
+        plt.imsave(base_path, self._combined_colorbar_rgba, origin="lower")
+        xmin, xmax, ymin, ymax = self._combined_colorbar_extent
+        scale_path = base_path.with_suffix(".txt")
+        scale_path.write_text(f"ymin={ymin}\nymax={ymax}\nxmin={xmin}\nxmax={xmax}\n")
+        if self._colorbar_fixed:
+            self._colorbar_saved = True
 
     def log_config(self, config_name: str, config1: dict | None = None, **config2):
         return None
@@ -222,7 +307,17 @@ class VisionPatchesBoundsLogger(Logger):
             self.fig.canvas.flush_events()
             plt.pause(0.001)
         out_file = self.image_dir / f"{function_name}_bounds_{i:04d}.png"
-        self.fig.savefig(out_file, dpi=self.dpi, bbox_inches="tight", pad_inches=0.0)
+        if self.separate_colorbar:
+            self._save_main_image(out_file)
+            if self._colorbar_fixed:
+                colorbar_file = self.image_dir / f"{function_name}_colormap.png"
+            else:
+                colorbar_file = self.image_dir / f"{function_name}_colormap_{i:04d}.png"
+            self._save_colorbar_assets(colorbar_file)
+        else:
+            self.fig.savefig(
+                out_file, dpi=self.dpi, bbox_inches="tight", pad_inches=0.0
+            )
 
     def __enter__(self):
         return self
@@ -275,16 +370,20 @@ if __name__ == "__main__":
     )
     cmd_args.parser.add_argument("--no-show", action="store_true")
     cmd_args.parser.add_argument("--dpi", type=int, default=150)
+    cmd_args.parser.add_argument(
+        "--separate-colormap",
+        action="store_true",
+        help="Save overlay images and colormap images as separate files.",
+    )
     args = cmd_args.parse_args()
 
     bounds_path = args.args.bounds
     bounds_df = pd.read_feather(bounds_path)
     lb_array, ub_array = _bounds_from_frame(bounds_df)
-    final_lb = lb_array[-1]
-    final_ub = ub_array[-1]
-    mid_final = (final_lb + final_ub) / 2
-    mid_scale = float(np.max(np.abs(mid_final))) if mid_final.size > 0 else 1.0
-    range_scale = float(np.max(np.abs(mid_final))) if mid_final.size > 0 else 1.0
+    mids = (lb_array + ub_array) / 2
+    mid_scale = float(np.max(np.abs(mids)))
+    mid_final = (lb_array[-1] + ub_array[-1]) / 2
+    range_scale = float(np.max(np.abs(mid_final)))
 
     sample = args.sample
     num_patches = args.num_patches[0]
@@ -299,7 +398,8 @@ if __name__ == "__main__":
         dpi=args.args.dpi,
         midpoint_scale_max_abs=mid_scale,
         range_scale_max_abs=range_scale,
+        separate_colorbar=args.args.separate_colormap,
     )
 
-    for i, (lb, ub) in enumerate(_iter_bounds(bounds_df)):
+    for i, (lb, ub) in tqdm(enumerate(_iter_bounds(bounds_df)), total=len(bounds_df)):
         logger.log_bounds("replay", i, (lb, ub))
