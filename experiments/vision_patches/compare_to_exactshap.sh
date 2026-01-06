@@ -1,6 +1,7 @@
 #!/bin/bash
 HERE="$(dirname "$0")"
 NETWORK="${1-experiments/resources/mnist-cnn.eqx}"
+SHAP_VARIANT="${2-zero-baseline}"
 network_filename=$(basename "$NETWORK")
 network_name="${network_filename%.*}"
 
@@ -15,7 +16,7 @@ if [ -z ${TIMESTAMP+x} ];
 then
   TIMESTAMP="$(date -u +%Y-%m-%d_%H-%M-%S)"
 fi
-EXPERIMENT_DIR="$HERE/output/compare_to_exactshap/${network_name}_${TIMESTAMP}"
+EXPERIMENT_DIR="$HERE/output/compare_to_exactshap/${network_name}_${SHAP_VARIANT}_${TIMESTAMP}"
 
 for num_patches in $(seq 5 11); do  # values above 12 go out of memory.
   printf "\n\nRunning Warmup for Branch and Bound for ${num_patches} patches...\n"
@@ -26,7 +27,7 @@ for num_patches in $(seq 5 11); do  # values above 12 go out of memory.
     --model "${NETWORK}" \
     --num-patches "${num_patches}" \
     --input 0 --output-feature 0 \
-    --shap-variant "zero-baseline" \
+    --shap-variant "${SHAP_VARIANT}" \
     --bound-method "bab" \
     --bound-options "batch_size=$BATCH_SIZE" \
     --out "$OUT_DIR" \
@@ -42,7 +43,7 @@ for num_patches in $(seq 5 11); do  # values above 12 go out of memory.
     --model "${NETWORK}" \
     --num-patches "${num_patches}" \
     --input 0 --output-feature 0 \
-    --shap-variant "zero-baseline" \
+    --shap-variant "${SHAP_VARIANT}" \
     --bound-method "bab" \
     --bound-options "batch_size=$BATCH_SIZE" \
     --out "$OUT_DIR" \
@@ -62,7 +63,7 @@ for num_patches in $(seq 5 6); do
       --model "${NETWORK}" \
       --num-patches "${num_patches}" \
       --input 0 --output-feature 0 \
-      --shap-variant "zero-baseline" \
+      --shap-variant "${SHAP_VARIANT}" \
       --out "$OUT_DIR" \
     
   sleep 15s
@@ -75,7 +76,7 @@ for num_patches in $(seq 5 6); do
       --model "${NETWORK}" \
       --num-patches "${num_patches}" \
       --input 0 --output-feature 0 \
-      --shap-variant "zero-baseline" \
+      --shap-variant "${SHAP_VARIANT}" \
       --out "$OUT_DIR" \
       --silent
   sleep 15s
