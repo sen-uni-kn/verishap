@@ -30,7 +30,7 @@ def _load_bab_run(info_path: Path) -> dict | None:
     timeout_reached = info.get("overall", {}).get("timeout", False)
     overall_rt = info.get("overall", {}).get("runtime", None)
 
-    dataset, *_ = info_path.parent.name.split("-")
+    num_patches = int(info_path.parent.name.split("_")[0])
     bounds_path = info_path.parent / "multi_shap_bab_bounds.feather"
     if not bounds_path.exists():
         return {
@@ -70,7 +70,7 @@ def _load_bab_run(info_path: Path) -> dict | None:
         exact_bounds = iter_times.iloc[-1]
 
     return {
-        "dataset": dataset,
+        "num_patches": f"{num_patches}x{num_patches}",
         "num_features": num_features,
         "num_effective_features": num_effective_features,
         "max_iters_reached": max_iters_reached,
