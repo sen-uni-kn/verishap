@@ -33,7 +33,7 @@ for estimator in "PermutationSHAP" "LeverageSHAP"; do
 done
 
 for estimator in "PermutationSHAP" "LeverageSHAP"; do
-    for seed in $(seq 0 10); do
+    for seed in $(seq 0 100); do
         sleep 5s
         printf "================================================================================\n"
         printf "Running ${estimator} with seed ${seed}\n"
@@ -54,7 +54,7 @@ for estimator in "PermutationSHAP" "LeverageSHAP"; do
           --seed "${seed}" \
           --silent
 
-        for num_samples in $(seq 10000 10000 130000); do
+        for num_samples in $(seq 10000 10000 160000); do
           OUT_DIR="${EXPERIMENT_DIR}/${estimator}/seed_${seed}/${num_samples}"
           mkdir -p "$OUT_DIR"
           python -m experiments.vision_patches.estimate \

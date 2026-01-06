@@ -1,8 +1,8 @@
 #!/bin/bash
 
 HERE="$(dirname "$0")"
-TIMEOUT=500
-HARD_TIMEOUT=700  # +200 seconds for setup, etc
+TIMEOUT=420
+HARD_TIMEOUT=620  # +200 seconds for setup, etc
 BAB_WARMUP_TIMEOUT=300  # 5min for downloading data and JAX compilation
 EXACTSHAP_WARMUP_TIMEOUT=60
 
