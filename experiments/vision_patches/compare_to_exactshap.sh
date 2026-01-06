@@ -17,7 +17,7 @@ then
 fi
 EXPERIMENT_DIR="$HERE/output/compare_to_exactshap/${network_name}_${TIMESTAMP}"
 
-for num_patches in $(seq 5 13); do
+for num_patches in $(seq 5 11); do  # values above 12 go out of memory.
   printf "\n\nRunning Warmup for Branch and Bound for ${num_patches} patches...\n"
 
   OUT_DIR="${EXPERIMENT_DIR}/warmup/BaB/${num_patches}_patches"
