@@ -34,7 +34,7 @@ def _load_bab_run(info_path: Path) -> dict | None:
     bounds_path = info_path.parent / "multi_shap_bab_bounds.feather"
     if not bounds_path.exists():
         return {
-            "dataset": dataset,
+            "num_patches": f"{num_patches}x{num_patches}",
             "num_features": num_features,
             "num_effective_features": num_effective_features,
             "max_iters_reached": max_iters_reached,
@@ -93,10 +93,9 @@ def _load_exactshap_run(info_path: Path) -> dict | None:
     with info_path.open("r") as f:
         info = yaml.safe_load(f)
 
-    dataset, *_ = info_path.parent.name.split("-")
-
+    num_patches = int(info_path.parent.name.split("_")[0])
     runtime = info.get("overall", {}).get("runtime", None)
-    return {"dataset": dataset, "overall": runtime}
+    return {"num_patches": f"{num_patches}x{num_patches}", "overall": runtime}
 
 
 def _iter_runs(data_dir: Path, load_run) -> Iterable[dict]:
@@ -115,18 +114,18 @@ def main(data_dir: Path) -> None:
 
     data = defaultdict(dict)
     for run in bab_runs:
-        dataset = run["dataset"]
-        data[dataset]["num_features"] = run["num_features"]
-        data[dataset]["num_effective_features"] = run["num_effective_features"]
+        num_patches = run["num_patches"]
+        data[num_patches]["num_features"] = run["num_features"]
+        data[num_patches]["num_effective_features"] = run["num_effective_features"]
         for key, value in run.items():
-            if key not in ["dataset", "num_features", "num_effective_features"]:
-                data[dataset][f"bab_{key}"] = value
+            if key not in ["num_patches", "num_features", "num_effective_features"]:
+                data[num_patches][f"bab_{key}"] = value
     for run in exactshap_runs:
-        dataset = run["dataset"]
-        data[dataset]["exactshap"] = run["overall"]
+        num_patches = run["num_patches"]
+        data[num_patches]["exactshap"] = run["overall"]
 
     df = pd.DataFrame.from_dict(data, orient="index")
-    df = df.sort_values(by="num_effective_features")
+    df = df.sort_values(by="num_features")
 
     pd.set_option("display.max_rows", None)
     pd.set_option("display.max_columns", None)
