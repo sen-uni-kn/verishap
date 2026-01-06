@@ -10,7 +10,38 @@ then
 fi
 EXPERIMENT_DIR="$HERE/output/bab_vs_sampling/${network_name}_${TIMESTAMP}"
 
+printf "================================================================================\n"
+printf "Running Warmup for Branch and Bound\n"
+printf "================================================================================\n"
 
+OUT_DIR="${EXPERIMENT_DIR}/warmup/BaB/"
+mkdir -p "$OUT_DIR"
+python -m experiments.tabular.bound \
+  --model "${NETWORK}" \
+  --input 0 --output-feature 0 \
+  --shap-variant "zero-baseline" \
+  --bound-method "bab" \
+  --bound-options "batch_size=$BATCH_SIZE" \
+  --out "$OUT_DIR" \
+  --max-iters 2
+
+sleep 15s
+printf "================================================================================\n"
+printf "Running Branch and Bound\n"
+printf "================================================================================\n"
+
+OUT_DIR="${EXPERIMENT_DIR}/BaB/"
+mkdir -p "$OUT_DIR"
+python -m experiments.tabular.bound \
+  --model "${NETWORK}" \
+  --input 0 --output-feature 0 \
+  --shap-variant "zero-baseline" \
+  --bound-method "bab" \
+  --bound-options "batch_size=$BATCH_SIZE" \
+  --out "$OUT_DIR" \
+  --silent
+
+sleep 15s
 printf "================================================================================\n"
 printf "Running Warmup for Sampling\n"
 printf "================================================================================\n"
@@ -18,9 +49,8 @@ printf "========================================================================
 for estimator in "PermutationSHAP" "LeverageSHAP"; do
     OUT_DIR="${EXPERIMENT_DIR}/warmup/${estimator}/"
     mkdir -p "$OUT_DIR"
-    python -m experiments.vision_patches.estimate \
+    python -m experiments.tabular.estimate \
     --model "${NETWORK}" \
-    --num-patches "${NUM_PATCHES}" \
     --input 0 --output-feature 0 \
     --shap-variant "zero-baseline" \
     --estimator "${estimator}" \
@@ -66,34 +96,4 @@ for estimator in "PermutationSHAP" "LeverageSHAP"; do
     done
 done
 
-sleep 15s
-printf "================================================================================\n"
-printf "Running Warmup for Branch and Bound\n"
-printf "================================================================================\n"
-
-OUT_DIR="${EXPERIMENT_DIR}/warmup/BaB/"
-mkdir -p "$OUT_DIR"
-python -m experiments.tabular.bound \
-  --model "${NETWORK}" \
-  --input 0 --output-feature 0 \
-  --shap-variant "zero-baseline" \
-  --bound-method "bab" \
-  --bound-options "batch_size=$BATCH_SIZE" \
-  --out "$OUT_DIR" \
-  --max-iters 2
-
-sleep 15s
-printf "================================================================================\n"
-printf "Running Branch and Bound\n"
-printf "================================================================================\n"
-
-OUT_DIR="${EXPERIMENT_DIR}/BaB/"
-mkdir -p "$OUT_DIR"
-python -m experiments.tabular.bound \
-  --model "${NETWORK}" \
-  --input 0 --output-feature 0 \
-  --shap-variant "zero-baseline" \
-  --bound-method "bab" \
-  --bound-options "batch_size=$BATCH_SIZE" \
-  --out "$OUT_DIR" \
-  --silent
+printf "Experiment complete.\n"
