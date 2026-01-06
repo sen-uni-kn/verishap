@@ -34,7 +34,7 @@ for num_patches in $(seq 5 11); do  # values above 12 go out of memory.
     --timeout "$BAB_WARMUP_TIMEOUT"
 
   sleep 15s
-  printf "\n\nRunning Branch and Bound on ${network}...\n"
+  printf "\n\nRunning Branch and Bound on ${num_patches} patches...\n"
 
   OUT_DIR="${EXPERIMENT_DIR}/BaB/${num_patches}_patches"
   mkdir -p "$OUT_DIR"
@@ -66,9 +66,9 @@ for num_patches in $(seq 5 6); do
       --out "$OUT_DIR" \
     
   sleep 15s
-  printf "\n\nRunning ExactSHAP on ${network}...\n"
+  printf "\n\nRunning ExactSHAP on ${num_patches} patches...\n"
 
-  OUT_DIR="${EXPERIMENT_DIR}/ExactSHAP/${network_name}"
+  OUT_DIR="${EXPERIMENT_DIR}/ExactSHAP/${num_patches}_patches"
   mkdir -p "$OUT_DIR"
   timeout "$TIMEOUT" \
     python -m experiments.vision_patches.exact_shap \
