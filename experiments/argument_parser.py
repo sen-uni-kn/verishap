@@ -672,7 +672,7 @@ class CmdArgs:
                 return jnp.sum(x != baseline).item()
             case "superfeature-zero-baseline" | "superfeature-mean-baseline":
                 in_dims = tuple(range(-x.ndim, 0))
-                return ((x != baseline) | ~self.masks).any(axis=in_dims).sum().item()
+                return ((x != baseline) & self.masks).any(axis=in_dims).sum().item()
             case _:
                 return None
 
