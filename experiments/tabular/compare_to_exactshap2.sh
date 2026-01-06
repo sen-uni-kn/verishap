@@ -1,10 +1,11 @@
 #!/bin/bash
 HERE="$(dirname "$0")"
-TIMEOUT=900  # 15min
-
-BATCH_SIZE=4096
 NETWORK="$1"
 MAX_SIZE="$2"
+SHAP_VARIANT="${3-zero-baseline}"
+
+TIMEOUT=420  # 7min
+BATCH_SIZE=4096
 network_filename=$(basename "$NETWORK")
 network_name="${network_filename%.*}"
 
@@ -12,7 +13,7 @@ if [ -z ${TIMESTAMP+x} ];
 then
   TIMESTAMP="$(date -u +%Y-%m-%d_%H-%M-%S)"
 fi
-EXPERIMENT_DIR="$HERE/output/compare_to_exactshap2/${network_name}_${TIMESTAMP}"
+EXPERIMENT_DIR="$HERE/output/compare_to_exactshap2/${network_name}_${SHAP_VARIANT}_${TIMESTAMP}"
 
 
 WARMUP_SIZE=13
@@ -26,7 +27,7 @@ python -m experiments.tabular.exact_shap \
   --model "${NETWORK}" \
   --effective-features ${WARMUP_SIZE} \
   --input 0 --output-feature 0 \
-  --shap-variant "zero-baseline" \
+  --shap-variant "${SHAP_VARIANT}" \
   --out "$OUT_DIR"
 
 sleep 15s
@@ -40,7 +41,7 @@ python -m experiments.tabular.bound \
   --model "${NETWORK}" \
   --effective-features ${WARMUP_SIZE} \
   --input 0 --output-feature 0 \
-  --shap-variant "zero-baseline" \
+  --shap-variant "${SHAP_VARIANT}" \
   --bound-method "bab" \
   --bound-options "batch_size=$BATCH_SIZE" \
   --out "$OUT_DIR" \
@@ -60,7 +61,7 @@ for ((i=10; i<=MAX_SIZE; i++)); do
         --model "${NETWORK}" \
         --effective-features $i \
         --input 0 --output-feature 0 \
-        --shap-variant "zero-baseline" \
+        --shap-variant "${SHAP_VARIANT}" \
         --out "$OUT_DIR" \
         --silent
   fi
@@ -76,11 +77,11 @@ for ((i=10; i<=MAX_SIZE; i++)); do
     --model "${NETWORK}" \
     --effective-features $i \
     --input 0 --output-feature 0 \
-    --shap-variant "zero-baseline" \
+    --shap-variant "${SHAP_VARIANT}" \
     --bound-method "bab" \
     --bound-options "batch_size=$BATCH_SIZE" \
     --out "$OUT_DIR" \
-    --timeout "$TIMEOUT" --max-iters 10000 \
+    --timeout "$TIMEOUT" \
     --silent
 done
 

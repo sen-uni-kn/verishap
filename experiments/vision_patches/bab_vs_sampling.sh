@@ -1,19 +1,54 @@
 #!/bin/bash
 HERE="$(dirname "$0")"
 
-BATCH_SIZE=4096
-NETWORK="${1-experiments/resources/mnist-cnn.eqx}"
-NUM_PATCHES="${2-7}"
+NUM_PATCHES="${1-7}"
+SHAP_VARIANT="${2-zero-baseline}"
+NETWORK="${3-experiments/resources/mnist-cnn.eqx}"
 network_filename=$(basename "$NETWORK")
 network_name="${network_filename%.*}"
+
+BATCH_SIZE=4096
 
 if [ -z ${TIMESTAMP+x} ];
 then
   TIMESTAMP="$(date -u +%Y-%m-%d_%H-%M-%S)"
 fi
-EXPERIMENT_DIR="$HERE/output/bab_vs_sampling/${network_name}_${TIMESTAMP}"
+EXPERIMENT_DIR="$HERE/output/bab_vs_sampling/${network_name}_${SHAP_VARIANT}_${TIMESTAMP}"
 
+printf "================================================================================\n"
+printf "Running Warmup for Branch and Bound\n"
+printf "================================================================================\n"
 
+OUT_DIR="${EXPERIMENT_DIR}/warmup/BaB/"
+mkdir -p "$OUT_DIR"
+python -m experiments.vision_patches.bound \
+  --model "${NETWORK}" \
+  --num-patches "${NUM_PATCHES}" \
+  --input 0 --output-feature 0 \
+  --shap-variant "${SHAP_VARIANT}" \
+  --bound-method "bab" \
+  --bound-options "batch_size=$BATCH_SIZE" \
+  --out "$OUT_DIR" \
+  --max-iters 2
+
+sleep 15s
+printf "================================================================================\n"
+printf "Running Branch and Bound\n"
+printf "================================================================================\n"
+
+OUT_DIR="${EXPERIMENT_DIR}/BaB/"
+mkdir -p "$OUT_DIR"
+python -m experiments.vision_patches.bound \
+  --model "${NETWORK}" \
+  --num-patches "${NUM_PATCHES}" \
+  --input 0 --output-feature 0 \
+  --shap-variant "${SHAP_VARIANT}" \
+  --bound-method "bab" \
+  --bound-options "batch_size=$BATCH_SIZE" \
+  --out "$OUT_DIR" \
+  --silent
+
+sleep 15s
 printf "================================================================================\n"
 printf "Running Warmup for Sampling\n"
 printf "================================================================================\n"
@@ -25,7 +60,7 @@ for estimator in "PermutationSHAP" "LeverageSHAP"; do
     --model "${NETWORK}" \
     --num-patches "${NUM_PATCHES}" \
     --input 0 --output-feature 0 \
-    --shap-variant "zero-baseline" \
+    --shap-variant "${SHAP_VARIANT}" \
     --estimator "${estimator}" \
     --out "$OUT_DIR" \
     --num-samples "200" \
@@ -47,7 +82,7 @@ for estimator in "PermutationSHAP" "LeverageSHAP"; do
           --model "${NETWORK}" \
           --num-patches "${NUM_PATCHES}" \
           --input 0 --output-feature 0 \
-          --shap-variant "zero-baseline" \
+          --shap-variant "${SHAP_VARIANT}" \
           --estimator "${estimator}" \
           --out "$OUT_DIR" \
           --num-samples "1000" \
@@ -61,7 +96,7 @@ for estimator in "PermutationSHAP" "LeverageSHAP"; do
             --model "${NETWORK}" \
             --num-patches "${NUM_PATCHES}" \
             --input 0 --output-feature 0 \
-            --shap-variant "zero-baseline" \
+            --shap-variant "${SHAP_VARIANT}" \
             --estimator "${estimator}" \
             --out "$OUT_DIR" \
             --num-samples "${num_samples}" \
@@ -70,37 +105,3 @@ for estimator in "PermutationSHAP" "LeverageSHAP"; do
         done
     done
 done
-
-sleep 15s
-printf "================================================================================\n"
-printf "Running Warmup for Branch and Bound\n"
-printf "================================================================================\n"
-
-OUT_DIR="${EXPERIMENT_DIR}/warmup/BaB/"
-mkdir -p "$OUT_DIR"
-python -m experiments.vision_patches.bound \
-  --model "${NETWORK}" \
-  --num-patches "${NUM_PATCHES}" \
-  --input 0 --output-feature 0 \
-  --shap-variant "zero-baseline" \
-  --bound-method "bab" \
-  --bound-options "batch_size=$BATCH_SIZE" \
-  --out "$OUT_DIR" \
-  --max-iters 2
-
-sleep 15s
-printf "================================================================================\n"
-printf "Running Branch and Bound\n"
-printf "================================================================================\n"
-
-OUT_DIR="${EXPERIMENT_DIR}/BaB/"
-mkdir -p "$OUT_DIR"
-python -m experiments.vision_patches.bound \
-  --model "${NETWORK}" \
-  --num-patches "${NUM_PATCHES}" \
-  --input 0 --output-feature 0 \
-  --shap-variant "zero-baseline" \
-  --bound-method "bab" \
-  --bound-options "batch_size=$BATCH_SIZE" \
-  --out "$OUT_DIR" \
-  --silent

@@ -1,14 +1,15 @@
 #!/bin/bash
 HERE="$(dirname "$0")"
+NETWORK="${1-experiments/resources/nhanesi-mlp-8x1.eqx}"
+SHAP_VARIANT="${2-zero-baseline}"
 
 BATCH_SIZE=4096
-NETWORK="${1-experiments/resources/nhanesi-mlp-8x1.eqx}"
 
 if [ -z ${TIMESTAMP+x} ];
 then
   TIMESTAMP="$(date -u +%Y-%m-%d_%H-%M-%S)"
 fi
-EXPERIMENT_DIR="$HERE/output/bab_vs_sampling/${network_name}_${TIMESTAMP}"
+EXPERIMENT_DIR="$HERE/output/bab_vs_sampling/${network_name}_${SHAP_VARIANT}_${TIMESTAMP}"
 
 printf "================================================================================\n"
 printf "Running Warmup for Branch and Bound\n"
@@ -19,7 +20,7 @@ mkdir -p "$OUT_DIR"
 python -m experiments.tabular.bound \
   --model "${NETWORK}" \
   --input 0 --output-feature 0 \
-  --shap-variant "zero-baseline" \
+  --shap-variant "${SHAP_VARIANT}" \
   --bound-method "bab" \
   --bound-options "batch_size=$BATCH_SIZE" \
   --out "$OUT_DIR" \
@@ -35,7 +36,7 @@ mkdir -p "$OUT_DIR"
 python -m experiments.tabular.bound \
   --model "${NETWORK}" \
   --input 0 --output-feature 0 \
-  --shap-variant "zero-baseline" \
+  --shap-variant "${SHAP_VARIANT}" \
   --bound-method "bab" \
   --bound-options "batch_size=$BATCH_SIZE" \
   --out "$OUT_DIR" \
@@ -52,7 +53,7 @@ for estimator in "PermutationSHAP" "LeverageSHAP"; do
     python -m experiments.tabular.estimate \
     --model "${NETWORK}" \
     --input 0 --output-feature 0 \
-    --shap-variant "zero-baseline" \
+    --shap-variant "${SHAP_VARIANT}" \
     --estimator "${estimator}" \
     --out "$OUT_DIR" \
     --num-samples "200" \
@@ -73,7 +74,7 @@ for estimator in "PermutationSHAP" "LeverageSHAP"; do
         python -m experiments.tabular.estimate \
           --model "${NETWORK}" \
           --input 0 --output-feature 0 \
-          --shap-variant "zero-baseline" \
+          --shap-variant "${SHAP_VARIANT}" \
           --estimator "${estimator}" \
           --out "$OUT_DIR" \
           --num-samples "1000" \
@@ -86,7 +87,7 @@ for estimator in "PermutationSHAP" "LeverageSHAP"; do
           python -m experiments.tabular.estimate \
             --model "${NETWORK}" \
             --input 0 --output-feature 0 \
-            --shap-variant "zero-baseline" \
+            --shap-variant "${SHAP_VARIANT}" \
             --estimator "${estimator}" \
             --out "$OUT_DIR" \
             --num-samples "${num_samples}" \

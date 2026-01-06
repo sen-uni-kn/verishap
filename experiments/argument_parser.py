@@ -451,6 +451,10 @@ class CmdArgs:
                 return jnp.zeros_like(x)
             case "mean-baseline" | "superfeature-mean-baseline":
                 return self.data_mean.reshape(x.shape)
+            case "noise-baseline" | "superfeature-noise-baseline":
+                key = jax.random.PRNGKey(0)
+                noise = jax.random.normal(key, x.shape) * 0.25 + 0.5
+                return jnp.clip(noise, 0.0, 1.0)
             case _:
                 return None
 
@@ -471,11 +475,15 @@ class CmdArgs:
 
         x = self.sample
         match shap_variant:
-            case "zero-baseline" | "mean-baseline":
+            case "zero-baseline" | "mean-baseline" | "noise-baseline":
                 return baseline_value(self.model, x, self.baseline, out_feature)
             case "marginal":
                 return marginal_value(self.model, x, self.background_data, out_feature)
-            case "superfeature-zero-baseline" | "superfeature-mean-baseline":
+            case (
+                "superfeature-zero-baseline"
+                | "superfeature-mean-baseline"
+                | "superfeature-noise-baseline"
+            ):
                 return superfeature_baseline_value(
                     self.model, x, self.baseline, masks, out_feature
                 )
