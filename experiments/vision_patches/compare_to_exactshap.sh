@@ -68,7 +68,7 @@ for num_patches in $(seq 5 10); do
   sleep 15s
   printf "\n\nRunning ExactSHAP on ${network}...\n"
 
-  OUT_DIR="$HERE/output/compare_to_exactshap/${TIMESTAMP}/ExactSHAP/${network_name}"
+  OUT_DIR="${EXPERIMENT_DIR}/ExactSHAP/${network_name}"
   mkdir -p "$OUT_DIR"
   timeout "$TIMEOUT" \
     python -m experiments.tabular.exact_shap \
