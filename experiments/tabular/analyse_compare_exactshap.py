@@ -4,94 +4,99 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Iterable
 
+import numpy as np
 import pandas as pd
 import yaml
 
 
+def _get_runtime_at(condition: np.ndarray, iter_times: np.ndarray) -> float | None:
+    idx = np.where(condition)[0]
+    if len(idx) == 0:
+        return None
+    return iter_times[idx[0]]
+
+
 def _load_bab_run(info_path: Path) -> dict | None:
+    print("Loading", info_path)
+
     with info_path.open("r") as f:
         info = yaml.safe_load(f)
+    num_features = len(info["config"]["multi_shap_bab"]["features"])
+    num_effective_features = info["config"]["further_stats"][
+        "num_non_baseline_features"
+    ]
+    model_output = info["config"]["further_stats"]["model_output"]
+    max_iters_reached = info.get("overall", {}).get("max_iters", False)
+    timeout_reached = info.get("overall", {}).get("timeout", False)
+    overall_rt = info.get("overall", {}).get("runtime", None)
 
-    print("Loading", info_path)
     dataset, *_ = info_path.parent.name.split("-")
-    dataset_dim = len(info["config"]["multi_shap_bab"]["features"])
+    bounds_path = info_path.parent / "multi_shap_bab_bounds.feather"
+    if not bounds_path.exists():
+        return {
+            "dataset": dataset,
+            "num_features": num_features,
+            "num_effective_features": num_effective_features,
+            "max_iters_reached": max_iters_reached,
+            "timeout_reached": timeout_reached,
+            "overall": overall_rt,
+        }
+    bounds = pd.read_feather(bounds_path)
 
-    timeout = info.get("overall", {}).get("runtime", {}).get("timeout", True)
-    overall_rt = info.get("overall", {}).get("runtime", {}).get("overall")
-    some_separated_rt = info.get("overall", {}).get("runtime", {}).get("some_separated")
-    all_separated_rt = info.get("overall", {}).get("runtime", {}).get("all_separated")
-    largest_shap_rt = info.get("overall", {}).get("runtime", {}).get("largest_shap")
-    smallest_shap_rt = info.get("overall", {}).get("runtime", {}).get("smallest_shap")
-    max_range_less_than_1_rt = info.get("overall", {}).get("runtime", {}).get("max_range_less_than_1")
-    max_range_less_than_0_01_rt = info.get("overall", {}).get("runtime", {}).get("max_range_less_than_0.01")
-    max_range_less_than_0_001_rt = info.get("overall", {}).get("runtime", {}).get("max_range_less_than_0.001")
-    max_range_less_than_0_0001_rt = info.get("overall", {}).get("runtime", {}).get("max_range_less_than_0.0001")
-    max_range_less_than_0_00001_rt = info.get("overall", {}).get("runtime", {}).get("max_range_less_than_0.00001")
-    max_range_less_than_0_000001_rt = info.get("overall", {}).get("runtime", {}).get("max_range_less_than_0.000001")
-    max_range_less_than_0_0000001_rt = info.get("overall", {}).get("runtime", {}).get("max_range_less_than_0.0000001")
-    max_range_less_than_0_00000001_rt = info.get("overall", {}).get("runtime", {}).get("max_range_less_than_0.00000001")
+    iter_times = bounds["runtime"]
+    lbs = np.array([bounds[(f"{i}", "lb")] for i in range(num_features)]).T
+    ubs = np.array([bounds[(f"{i}", "ub")] for i in range(num_features)]).T
 
-    if timeout:
-        overall_rt = 900
-        if some_separated_rt is None:
-            some_separated_rt = 900
-        if all_separated_rt is None:
-            all_separated_rt = 900
-        if largest_shap_rt is None:
-            largest_shap_rt = 900
-        if smallest_shap_rt is None:
-            smallest_shap_rt = 900
-        if max_range_less_than_1_rt is None:
-            max_range_less_than_1_rt = 900
-        if max_range_less_than_0_01_rt is None:
-            max_range_less_than_0_01_rt = 900
-        if max_range_less_than_0_001_rt is None:
-            max_range_less_than_0_001_rt = 900
-        if max_range_less_than_0_0001_rt is None:
-            max_range_less_than_0_0001_rt = 900
-        if max_range_less_than_0_00001_rt is None:
-            max_range_less_than_0_00001_rt = 900
-        if max_range_less_than_0_000001_rt is None:
-            max_range_less_than_0_000001_rt = 900
-        if max_range_less_than_0_0000001_rt is None:
-            max_range_less_than_0_0000001_rt = 900
-        if max_range_less_than_0_00000001_rt is None:
-            max_range_less_than_0_00000001_rt = 900
+    lb_vs_each_ub = np.expand_dims(lbs, -1) > np.expand_dims(ubs, -2)
+    some_separated = lb_vs_each_ub.any(axis=(-1, -2))
+    some_separated_time = _get_runtime_at(some_separated, iter_times)
+
+    ref_vals1 = np.abs(model_output)
+    ranges_norm = ((ubs - lbs) / 2) / ref_vals1.reshape(-1, 1)
+    max_norm_ranges = ranges_norm.max(axis=-1)
+    max_norm1_ran_lt_10percent = _get_runtime_at(max_norm_ranges <= 0.1, iter_times)
+    max_norm1_ran_lt_1percent = _get_runtime_at(max_norm_ranges <= 0.01, iter_times)
+    max_norm1_ran_lt_1permille = _get_runtime_at(max_norm_ranges <= 0.001, iter_times)
+
+    ref_vals2 = np.max(np.abs((lbs + ubs) / 2), axis=-1)
+    ranges_norm = ((ubs - lbs) / 2) / ref_vals2.reshape(-1, 1)
+    max_norm_ranges = ranges_norm.max(axis=-1)
+    max_norm2_ran_lt_10percent = _get_runtime_at(max_norm_ranges <= 0.1, iter_times)
+    max_norm2_ran_lt_1percent = _get_runtime_at(max_norm_ranges <= 0.01, iter_times)
+    max_norm2_ran_lt_1permille = _get_runtime_at(max_norm_ranges <= 0.001, iter_times)
+
+    exact_bounds = None
+    if not max_iters_reached and not timeout_reached:
+        exact_bounds = iter_times.iloc[-1]
 
     return {
         "dataset": dataset,
-        "dataset_dim": dataset_dim,
-        "timeout": timeout,
-        "overall_rt": overall_rt,
-        "some_separated_rt": some_separated_rt,
-        "all_separated_rt": all_separated_rt,
-        "largest_shap_rt": largest_shap_rt,
-        "smallest_shap_rt": smallest_shap_rt,
-        "max_range_less_than_1_rt": max_range_less_than_1_rt,
-        "max_range_less_than_0_01_rt": max_range_less_than_0_01_rt,
-        "max_range_less_than_0_001_rt": max_range_less_than_0_001_rt,
-        "max_range_less_than_0_0001_rt": max_range_less_than_0_0001_rt,
-        "max_range_less_than_0_00001_rt": max_range_less_than_0_00001_rt,
-        "max_range_less_than_0_000001_rt": max_range_less_than_0_000001_rt,
-        "max_range_less_than_0_0000001_rt": max_range_less_than_0_0000001_rt,
-        "max_range_less_than_0_00000001_rt": max_range_less_than_0_00000001_rt,
+        "num_features": num_features,
+        "num_effective_features": num_effective_features,
+        "max_iters_reached": max_iters_reached,
+        "timeout_reached": timeout_reached,
+        "overall": overall_rt,
+        "exact_bounds": exact_bounds,
+        "some_separated": some_separated_time,
+        "max_norm_to_out_ran_lt_10percent": max_norm1_ran_lt_10percent,
+        "max_norm_to_out_ran_lt_1percent": max_norm1_ran_lt_1percent,
+        "max_norm_to_out_ran_lt_1permille": max_norm1_ran_lt_1permille,
+        "max_norm_to_maxmid_ran_lt_10percent": max_norm2_ran_lt_10percent,
+        "max_norm_to_maxmid_ran_lt_1percent": max_norm2_ran_lt_1percent,
+        "max_norm_to_maxmid_ran_lt_1permille": max_norm2_ran_lt_1permille,
     }
 
 
 def _load_exactshap_run(info_path: Path) -> dict | None:
+    print("Loading", info_path)
+
     with info_path.open("r") as f:
         info = yaml.safe_load(f)
 
     dataset, *_ = info_path.parent.name.split("-")
 
-    runtime = info.get("overall", {}).get("runtime")
-    timeout = True if runtime is None else False
-
-    return {
-        "dataset": dataset,
-        "timeout": timeout,
-        "overall_rt": runtime,
-    }
+    runtime = info.get("overall", {}).get("runtime", None)
+    return {"dataset": dataset, "overall": runtime}
 
 
 def _iter_runs(data_dir: Path, load_run) -> Iterable[dict]:
@@ -109,27 +114,19 @@ def main(data_dir: Path) -> None:
         raise SystemExit(f"No runs found in {data_dir}")
 
     data = defaultdict(dict)
-
     for run in bab_runs:
-        data[run["dataset"]]["input_dim"] = run["dataset_dim"]
-        data[run["dataset"]]["bab"] = run["overall_rt"]
-        data[run["dataset"]]["bab_some_separated"] = run["some_separated_rt"]
-        data[run["dataset"]]["bab_all_separated"] = run["all_separated_rt"]
-        data[run["dataset"]]["bab_largest_shap"] = run["largest_shap_rt"]
-        data[run["dataset"]]["bab_smallest_shap"] = run["smallest_shap_rt"]
-        data[run["dataset"]]["bab_max_range_less_than_1"] = run["max_range_less_than_1_rt"]
-        data[run["dataset"]]["bab_max_range_less_than_0_01"] = run["max_range_less_than_0_01_rt"]
-        data[run["dataset"]]["bab_max_range_less_than_0_001"] = run["max_range_less_than_0_001_rt"]
-        data[run["dataset"]]["bab_max_range_less_than_0_0001"] = run["max_range_less_than_0_0001_rt"]
-        data[run["dataset"]]["bab_max_range_less_than_0_00001"] = run["max_range_less_than_0_00001_rt"]
-        data[run["dataset"]]["bab_max_range_less_than_0_000001"] = run["max_range_less_than_0_000001_rt"]
-        data[run["dataset"]]["bab_max_range_less_than_0_0000001"] = run["max_range_less_than_0_0000001_rt"]
-        data[run["dataset"]]["bab_max_range_less_than_0_00000001"] = run["max_range_less_than_0_00000001_rt"]
+        dataset = run["dataset"]
+        data[dataset]["num_features"] = run["num_features"]
+        data[dataset]["num_effective_features"] = run["num_effective_features"]
+        for key, value in run.items():
+            if key not in ["dataset", "num_features", "num_effective_features"]:
+                data[dataset][f"bab_{key}"] = value
     for run in exactshap_runs:
-        data[run["dataset"]]["exactshap"] = run["overall_rt"]
+        dataset = run["dataset"]
+        data[dataset]["exactshap"] = run["overall"]
 
     df = pd.DataFrame.from_dict(data, orient="index")
-    df = df.sort_values(by="input_dim")
+    df = df.sort_values(by="num_effective_features")
 
     pd.set_option("display.max_rows", None)
     pd.set_option("display.max_columns", None)

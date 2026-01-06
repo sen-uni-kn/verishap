@@ -35,13 +35,13 @@ NETWORKS=(
   "lung_cancer-mlp-4x2.eqx"
   "online_news-mlp-8x2.eqx"
   # "sonar-mlp-32x2.eqx"
-  corrgroups60-mlp-16x2
-  independentlinear60-mlp-16x2
+  "corrgroups60-mlp-16x2.eqx"
+  "independentlinear60-mlp-16x2.eqx"
   # "handwritten_digits-mlp-64x2.eqx"
   "nhanesi-mlp-8x1.eqx"
-  "rt_iot-mlp-32x2.eqx"
-  "bankruptcy-mlp-32x2.eqx"
-  "communitiesandcrime-mlp-32x2.eqx"
+  # "rt_iot-mlp-32x2.eqx"
+  # "bankruptcy-mlp-32x2.eqx"
+  # "communitiesandcrime-mlp-32x2.eqx"
 )
 
 if [ -z ${TIMESTAMP+x} ];
