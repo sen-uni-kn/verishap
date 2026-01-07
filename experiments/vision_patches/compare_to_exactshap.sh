@@ -30,8 +30,7 @@ for num_patches in $(seq 5 11); do  # values above 11 go out of memory.
     --shap-variant "${SHAP_VARIANT}" \
     --bound-method "bab" \
     --bound-options "batch_size=$BATCH_SIZE" \
-    --out "$OUT_DIR" \
-    --max-iters 2 \
+    --out "$OUT_DIR" --max-iters 2 \
     --timeout "$BAB_WARMUP_TIMEOUT"
 
   sleep 15s
