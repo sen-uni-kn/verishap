@@ -1,8 +1,9 @@
 #!/bin/bash
 HERE="$(dirname "$0")"
 SHAP_VARIANT="${1-zero-baseline}"
-TIMEOUT=420
-HARD_TIMEOUT=620  # +200 seconds for setup, etc
+
+TIMEOUT=720
+HARD_TIMEOUT=920  # +200 seconds for setup, etc
 BAB_WARMUP_TIMEOUT=300  # 5min for downloading data and JAX compilation
 EXACTSHAP_WARMUP_TIMEOUT=60
 
@@ -28,8 +29,8 @@ NETWORKS=(
   "steel-mlp-8x2.eqx"
   "hepatitis-mlp-8x2.eqx"
   "breast_cancer-mlp-32x2.eqx"
-  "infrared_temperature-mlp-32x2.eqx"
-  "ionosphere-mlp-32x2.eqx"
+  # "infrared_temperature-mlp-32x2.eqx"
+  # "ionosphere-mlp-32x2.eqx"
   "support2-mlp-8x2.eqx"
   "diabetes130-mlp-32x2.eqx"
   "lung_cancer-mlp-4x2.eqx"

@@ -5,12 +5,18 @@ NETWORK="${2-experiments/resources/mnist-cnn.eqx}"
 network_filename=$(basename "$NETWORK")
 network_name="${network_filename%.*}"
 
-TIMEOUT=420
-HARD_TIMEOUT=620  # +200 seconds for setup, etc
+TIMEOUT=720
+HARD_TIMEOUT=920  # +200 seconds for setup, etc
 BAB_WARMUP_TIMEOUT=300  # 5min for downloading data and JAX compilation
 EXACTSHAP_WARMUP_TIMEOUT=60
 
 BATCH_SIZE=4096
+if [ "${SHAP_VARIANT}" = "marginal" ];
+then
+  BATCH_SIZE=32
+  TIMEOUT=1800
+  HARD_TIMEOUT=2000
+fi
 
 if [ -z ${TIMESTAMP+x} ];
 then
@@ -18,7 +24,7 @@ then
 fi
 EXPERIMENT_DIR="$HERE/output/compare_to_exactshap/${network_name}_${SHAP_VARIANT}_${TIMESTAMP}"
 
-for num_patches in $(seq 5 11); do  # values above 11 go out of memory.
+for num_patches in $(seq 5 7); do  # values above 7 go out of memory for mean-baseline
   printf "\n\nRunning Warmup for Branch and Bound for ${num_patches} patches...\n"
 
   OUT_DIR="${EXPERIMENT_DIR}/warmup/BaB/${num_patches}_patches"
