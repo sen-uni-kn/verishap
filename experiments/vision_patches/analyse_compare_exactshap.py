@@ -22,9 +22,9 @@ def _load_bab_run(info_path: Path) -> dict | None:
     with info_path.open("r") as f:
         info = yaml.safe_load(f)
     num_features = len(info["config"]["multi_shap_bab"]["features"])
-    num_effective_features = info["config"]["further_stats"][
-        "num_non_baseline_features"
-    ]
+    num_effective_features = info["config"]["further_stats"].get(
+        "num_non_baseline_features", None
+    )
     model_output = info["config"]["further_stats"]["model_output"]
     max_iters_reached = info.get("overall", {}).get("max_iters", False)
     timeout_reached = info.get("overall", {}).get("timeout", False)

@@ -585,7 +585,11 @@ class CmdArgs:
                 estimator = partial(estimator, self.baseline, self.sample)
             case "marginal":
                 estimator = partial(estimator, self.background_data, self.sample)
-            case "superfeature-zero-baseline" | "superfeature-mean-baseline" | "superfeature-noise-baseline":
+            case (
+                "superfeature-zero-baseline"
+                | "superfeature-mean-baseline"
+                | "superfeature-noise-baseline"
+            ):
                 baseline = self.baseline
                 baseline = jnp.expand_dims(baseline, axis=0)
                 masker = shaplib.superfeature_masker(self.sample, baseline, masks)
@@ -669,9 +673,13 @@ class CmdArgs:
         """The actual number of features that are different from the baseline."""
         x, baseline = self.sample, self.baseline
         match self.shap_variant:
-            case "zero-baseline" | "mean-baseline":
+            case "zero-baseline" | "mean-baseline" | "noise-baseline":
                 return jnp.sum(x != baseline).item()
-            case "superfeature-zero-baseline" | "superfeature-mean-baseline":
+            case (
+                "superfeature-zero-baseline"
+                | "superfeature-mean-baseline"
+                | "superfeature-noise-baseline"
+            ):
                 in_dims = tuple(range(-x.ndim, 0))
                 return ((x != baseline) & self.masks).any(axis=in_dims).sum().item()
             case _:

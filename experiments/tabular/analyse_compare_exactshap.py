@@ -22,9 +22,9 @@ def _load_bab_run(info_path: Path) -> dict | None:
     with info_path.open("r") as f:
         info = yaml.safe_load(f)
     num_features = len(info["config"]["multi_shap_bab"]["features"])
-    num_effective_features = info["config"]["further_stats"][
-        "num_non_baseline_features"
-    ]
+    num_effective_features = info["config"]["further_stats"].get(
+        "num_non_baseline_features", None
+    )
     model_output = info["config"]["further_stats"]["model_output"]
     max_iters_reached = info.get("overall", {}).get("max_iters", False)
     timeout_reached = info.get("overall", {}).get("timeout", False)
@@ -126,13 +126,35 @@ def main(data_dir: Path) -> None:
         data[dataset]["exactshap"] = run["overall"]
 
     df = pd.DataFrame.from_dict(data, orient="index")
-    df = df.sort_values(by="num_effective_features")
+    df = df.sort_values(by=["num_effective_features", "num_features"])
+    df.to_csv(data_dir / "runtimes.csv")
 
     pd.set_option("display.max_rows", None)
     pd.set_option("display.max_columns", None)
-    print(df)
-
-    df.to_csv(data_dir / "runtimes.csv")
+    pd.set_option("display.precision", 0)
+    pd.set_option("display.width", 100)
+    short_df = df.loc[
+        :,
+        [
+            "num_features",
+            "num_effective_features",
+            "exactshap",
+            "bab_max_norm_to_out_ran_lt_10percent",
+            "bab_max_norm_to_out_ran_lt_1percent",
+            "bab_max_norm_to_out_ran_lt_1permille",
+            "bab_exact_bounds",
+        ],
+    ]
+    short_df.columns = [
+        "#features",
+        "#effective",
+        "exactshap",
+        "bab 10%",
+        "bab 1%",
+        "bab 0.1%",
+        "bab exact",
+    ]
+    print(short_df)
 
 
 if __name__ == "__main__":
