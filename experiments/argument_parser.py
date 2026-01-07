@@ -581,19 +581,12 @@ class CmdArgs:
             )
 
         match shap_variant:
-            case "zero-baseline":
-                baseline = jnp.zeros_like(self.sample)
-                estimator = partial(estimator, baseline, self.sample)
-            case "mean-baseline":
-                baseline = self.data_mean.reshape(self.sample.shape)
-                estimator = partial(estimator, baseline, self.sample)
+            case "zero-baseline" | "mean-baseline" | "noise-baseline":
+                estimator = partial(estimator, self.baseline, self.sample)
             case "marginal":
                 estimator = partial(estimator, self.background_data, self.sample)
-            case "superfeature-zero-baseline" | "superfeature-mean-baseline":
-                if shap_variant == "superfeature-zero-baseline":
-                    baseline = jnp.zeros_like(self.sample)
-                else:
-                    baseline = self.data_mean.reshape(self.sample.shape)
+            case "superfeature-zero-baseline" | "superfeature-mean-baseline" | "superfeature-noise-baseline":
+                baseline = self.baseline
                 baseline = jnp.expand_dims(baseline, axis=0)
                 masker = shaplib.superfeature_masker(self.sample, baseline, masks)
                 x = jnp.ones(masks.shape[0], dtype=jnp.float32)
