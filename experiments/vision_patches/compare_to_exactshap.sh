@@ -1,7 +1,7 @@
 #!/bin/bash
 HERE="$(dirname "$0")"
-NETWORK="${1-experiments/resources/mnist-cnn.eqx}"
-SHAP_VARIANT="${2-zero-baseline}"
+SHAP_VARIANT="${1-zero-baseline}"
+NETWORK="${2-experiments/resources/mnist-cnn.eqx}"
 network_filename=$(basename "$NETWORK")
 network_name="${network_filename%.*}"
 
@@ -18,7 +18,7 @@ then
 fi
 EXPERIMENT_DIR="$HERE/output/compare_to_exactshap/${network_name}_${SHAP_VARIANT}_${TIMESTAMP}"
 
-for num_patches in $(seq 5 13); do
+for num_patches in $(seq 5 11); do  # values above 11 go out of memory.
   printf "\n\nRunning Warmup for Branch and Bound for ${num_patches} patches...\n"
 
   OUT_DIR="${EXPERIMENT_DIR}/warmup/BaB/${num_patches}_patches"
