@@ -53,11 +53,11 @@ class NumpyVisionDataset:
             data = data.numpy()
         assert isinstance(data, np.ndarray)
         if self.channel_last:
-            if data.ndim == 3:
-                data = np.moveaxis(data, -1, 0)
+            if data.shape != self.shape:
+                data = np.moveaxis(data, -1, 1)
             else:
                 data = np.moveaxis(data, -1, 0)
-        if self.shape[0] == 1 and data.ndim == 2:
+        if self.shape[0] == 1:
             batch_shape = data.shape[:-2]
         else:
             batch_shape = data.shape[:-3]
