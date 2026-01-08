@@ -86,7 +86,14 @@ for network in "${NETWORKS[@]}"; do
   sleep 15s
 done
 
-for network in "${NETWORKS[@]}"; do
+# For the other networks, ExactSHAP ungracefully runs out of memory.
+EXACTSHAP_NETWORKS=(
+  "adult-mlp-32x2.eqx"
+  "obesity-mlp-32x2.eqx"
+  "german-mlp-8x1.eqx"
+)
+
+for network in "${EXACTSHAP_NETWORKS[@]}"; do
   network_filename=$(basename "$network")
   network_name="${network_filename%.*}"
 
