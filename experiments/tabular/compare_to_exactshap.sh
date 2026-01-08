@@ -1,26 +1,18 @@
 #!/bin/bash
 HERE="$(dirname "$0")"
-SHAP_VARIANT="${1-zero-baseline}"
+SHAP_VARIANT="${1-marginal}"
 
-TIMEOUT=720
-HARD_TIMEOUT=920  # +200 seconds for setup, etc
+TIMEOUT=600
+HARD_TIMEOUT=800  # +200 seconds for setup, etc
 BAB_WARMUP_TIMEOUT=300  # 5min for downloading data and JAX compilation
 EXACTSHAP_WARMUP_TIMEOUT=60
 
 BATCH_SIZE=4096
 # Sorted by effective input dimension
 NETWORKS=(
-  # "iris-mlp-32x2.eqx"
-  # "california-mlp-64x2.eqx"
-  # "diabetes-mlp-32x1.eqx"
-  # "spambase-mlp-32x2.eqx"
-  # "covertype-mlp-32x2.eqx"
   "adult-mlp-32x2.eqx"
   "obesity-mlp-32x2.eqx"
-  # "vehicles-mlp-32x2.eqx"
-  # "parkinsons-mlp-32x2.eqx"
   "german-mlp-8x1.eqx"
-  # "cdc_diabetes-mlp-128x3.eqx"
   "mushroom-mlp-8x1.eqx"
   "default-mlp-64x3.eqx"
   "automobile-mlp-32x2.eqx"
@@ -38,8 +30,8 @@ NETWORKS=(
   "sonar-mlp-32x2.eqx"
   # "corrgroups60-mlp-16x2.eqx"
   # "independentlinear60-mlp-16x2.eqx"
-  "handwritten_digits-mlp-64x2.eqx"
-  "nhanesi-mlp-8x1.eqx"
+  # "handwritten_digits-mlp-64x2.eqx"
+  # "nhanesi-mlp-8x1.eqx"
   # "rt_iot-mlp-32x2.eqx"
   # "bankruptcy-mlp-32x2.eqx"
   # "communitiesandcrime-mlp-32x2.eqx"

@@ -2,7 +2,7 @@
 import argparse
 from collections import defaultdict
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 import numpy as np
 import pandas as pd
@@ -106,7 +106,7 @@ def _iter_runs(data_dir: Path, load_run) -> Iterable[dict]:
             yield run
 
 
-def main(data_dir: Path) -> None:
+def _load_data_dir(data_dir: Path) -> dict:
     bab_runs = list(_iter_runs(data_dir / "BaB", _load_bab_run))
     exactshap_runs = list(_iter_runs(data_dir / "ExactSHAP", _load_exactshap_run))
 
@@ -128,12 +128,20 @@ def main(data_dir: Path) -> None:
     df = pd.DataFrame.from_dict(data, orient="index")
     df = df.sort_values(by=["num_effective_features", "num_features"])
     df.to_csv(data_dir / "runtimes.csv")
+    return df
+
+
+def main(data_dirs: Sequence[Path]) -> None:
+    data = [_load_data_dir(data_dir) for data_dir in data_dirs]
+    concat = pd.concat(data)
+    median = concat.groupby(concat.index).median()
+    median = median.sort_values(by=["num_effective_features", "num_features"])
 
     pd.set_option("display.max_rows", None)
     pd.set_option("display.max_columns", None)
     pd.set_option("display.precision", 0)
     pd.set_option("display.width", 100)
-    short_df = df.loc[
+    short_df = median.loc[
         :,
         [
             "num_features",
@@ -162,8 +170,9 @@ if __name__ == "__main__":
         description="Analyse compare_to_exactshap outputs."
     )
     parser.add_argument(
-        "data_dir",
+        "data_dirs",
         type=Path,
-        help="Directory containing compare_heuristics outputs.",
+        nargs="+",
+        help="Directories containing compare_to_exactshap outputs.",
     )
-    main(parser.parse_args().data_dir)
+    main(parser.parse_args().data_dirs)
