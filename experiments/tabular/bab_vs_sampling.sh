@@ -38,7 +38,7 @@ for network in "${NETWORKS[@]}"; do
     --bound-options "batch_size=$BATCH_SIZE" \
     --out "$OUT_DIR" \
     --max-iters 2 \
-    --timeout "$BAB_WARMUP_TIMEOUT"
+    --timeout "$TIMEOUT"
 
   sleep 15s
   printf "\n\nRunning Branch and Bound on ${network}...\n"
@@ -105,15 +105,16 @@ for estimator in "KernelSHAP" "PermutationSHAP" "LeverageSHAP"; do
       for num_samples in $(seq 10000 10000 200000); do
         OUT_DIR="${EXPERIMENT_DIR}/${estimator}/seed_${seed}/${num_samples}"
         mkdir -p "$OUT_DIR"
-        python -m experiments.tabular.estimate \
-          --model "${NETWORK}" \
-          --input 0 --output-feature 0 \
-          --shap-variant "${SHAP_VARIANT}" \
-          --estimator "${estimator}" \
-          --out "$OUT_DIR" \
-          --num-samples "${num_samples}" \
-          --seed "${seed}" \
-          --silent
+        timeout "$TIMEOUT" \
+          python -m experiments.tabular.estimate \
+            --model "${NETWORK}" \
+            --input 0 --output-feature 0 \
+            --shap-variant "${SHAP_VARIANT}" \
+            --estimator "${estimator}" \
+            --out "$OUT_DIR" \
+            --num-samples "${num_samples}" \
+            --seed "${seed}" \
+            --silent
 
         if [ $? == 124 ]; then
           echo "Timeout reached for ${estimator} on ${network} with seed ${seed} and ${num_samples} samples"
