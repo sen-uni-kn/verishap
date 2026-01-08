@@ -375,6 +375,7 @@ if __name__ == "__main__":
         action="store_true",
         help="Save overlay images and colormap images as separate files.",
     )
+    cmd_args.parser.add_argument("--speed", type=int, default=1)
     args = cmd_args.parse_args()
 
     bounds_path = args.args.bounds
@@ -401,5 +402,9 @@ if __name__ == "__main__":
         separate_colorbar=args.args.separate_colormap,
     )
 
+    speed = args.args.speed
     for i, (lb, ub) in tqdm(enumerate(_iter_bounds(bounds_df)), total=len(bounds_df)):
+        if i % speed == 0:
+            logger.log_bounds("replay", i, (lb, ub))
+    if i % speed != 0:
         logger.log_bounds("replay", i, (lb, ub))
