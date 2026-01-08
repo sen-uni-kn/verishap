@@ -1,75 +1,109 @@
 #!/bin/bash
 HERE="$(dirname "$0")"
-NETWORK="${1-experiments/resources/nhanesi-mlp-8x1.eqx}"
-SHAP_VARIANT="${2-zero-baseline}"
+SHAP_VARIANT="${1-marginal}"
+
+TIMEOUT=200
 
 BATCH_SIZE=4096
+# Sorted by effective input dimension
+NETWORKS=(
+  "mushroom-mlp-8x1.eqx"
+  "default-mlp-64x3.eqx"
+  "automobile-mlp-32x2.eqx"
+  # "steel-mlp-8x2.eqx"
+  # "breast_cancer-mlp-32x2.eqx"
+  "annealing-mlp-32x2.eqx"
+  "sonar-mlp-32x2.eqx"
+)
 
 if [ -z ${TIMESTAMP+x} ];
 then
   TIMESTAMP="$(date -u +%Y-%m-%d_%H-%M-%S)"
 fi
-EXPERIMENT_DIR="$HERE/output/bab_vs_sampling/${network_name}_${SHAP_VARIANT}_${TIMESTAMP}"
+EXPERIMENT_DIR="$HERE/output/bab_vs_sampling/${SHAP_VARIANT}_${TIMESTAMP}"
 
-printf "================================================================================\n"
-printf "Running Warmup for Branch and Bound\n"
-printf "================================================================================\n"
+for network in "${NETWORKS[@]}"; do
+  network_filename=$(basename "$network")
+  network_name="${network_filename%.*}"
 
-OUT_DIR="${EXPERIMENT_DIR}/warmup/BaB/"
-mkdir -p "$OUT_DIR"
-python -m experiments.tabular.bound \
-  --model "${NETWORK}" \
-  --input 0 --output-feature 0 \
-  --shap-variant "${SHAP_VARIANT}" \
-  --bound-method "bab" \
-  --bound-options "batch_size=$BATCH_SIZE" \
-  --out "$OUT_DIR" \
-  --max-iters 2
+  printf "\n\nRunning Warmup for Branch and Bound on ${network}...\n"
 
-sleep 15s
-printf "================================================================================\n"
-printf "Running Branch and Bound\n"
-printf "================================================================================\n"
-
-OUT_DIR="${EXPERIMENT_DIR}/BaB/"
-mkdir -p "$OUT_DIR"
-python -m experiments.tabular.bound \
-  --model "${NETWORK}" \
-  --input 0 --output-feature 0 \
-  --shap-variant "${SHAP_VARIANT}" \
-  --bound-method "bab" \
-  --bound-options "batch_size=$BATCH_SIZE" \
-  --out "$OUT_DIR" \
-  --silent
-
-sleep 15s
-printf "================================================================================\n"
-printf "Running Warmup for Sampling\n"
-printf "================================================================================\n"
-
-for estimator in "PermutationSHAP" "LeverageSHAP"; do
-    OUT_DIR="${EXPERIMENT_DIR}/warmup/${estimator}/"
-    mkdir -p "$OUT_DIR"
-    python -m experiments.tabular.estimate \
-    --model "${NETWORK}" \
+  OUT_DIR="${EXPERIMENT_DIR}/warmup/BaB/${network_name}"
+  mkdir -p "$OUT_DIR"
+  python -m experiments.tabular.bound \
+    --model "experiments/resources/${network}" \
     --input 0 --output-feature 0 \
     --shap-variant "${SHAP_VARIANT}" \
-    --estimator "${estimator}" \
+    --bound-method "bab" \
+    --bound-options "batch_size=$BATCH_SIZE" \
     --out "$OUT_DIR" \
-    --num-samples "200" \
-    --seed 0
+    --max-iters 2 \
+    --timeout "$BAB_WARMUP_TIMEOUT"
+
+  sleep 15s
+  printf "\n\nRunning Branch and Bound on ${network}...\n"
+
+  OUT_DIR="${EXPERIMENT_DIR}/BaB/${network_name}"
+  mkdir -p "$OUT_DIR"
+  python -m experiments.tabular.bound \
+    --model "experiments/resources/${network}" \
+    --input 0 --output-feature 0 \
+    --shap-variant "${SHAP_VARIANT}" \
+    --bound-method "bab" \
+    --bound-options "batch_size=$BATCH_SIZE" \
+    --out "$OUT_DIR" \
+    --timeout "$TIMEOUT" \
+    --silent
+  sleep 15s
 done
 
-for estimator in "PermutationSHAP" "LeverageSHAP"; do
-    for seed in $(seq 0 4); do
+for estimator in "KernelSHAP" "PermutationSHAP" "LeverageSHAP"; do
+  for network in "${NETWORKS[@]}"; do
+    network_filename=$(basename "$network")
+    network_name="${network_filename%.*}"
+
+    sleep 15s
+    printf "================================================================================\n"
+    printf "Running Warmup for ${estimator} on ${network}\n"
+    printf "================================================================================\n"
+
+    OUT_DIR="${EXPERIMENT_DIR}/warmup/${estimator}/${network_name}"
+    mkdir -p "$OUT_DIR"
+    python -m experiments.tabular.estimate \
+      --model "${NETWORK}" \
+      --input 0 --output-feature 0 \
+      --shap-variant "${SHAP_VARIANT}" \
+      --estimator "${estimator}" \
+      --out "$OUT_DIR" \
+      --num-samples "200" \
+      --seed 0
+
+    for seed in $(seq 0 9); do
+      sleep 5s
+      printf "================================================================================\n"
+      printf "Running ${estimator} on ${network} with seed ${seed}\n"
+      printf "================================================================================\n"
+      
+      # Sampling in individual calls to have the time required for jitting in each call
+      # for a fair comparison with BaB, which also includes the jitting overhead.
+      for num_samples in $(seq 1000 1000 9000); do
+        OUT_DIR="${EXPERIMENT_DIR}/${estimator}/${network_name}/seed_${seed}/${num_samples}"
+        mkdir -p "$OUT_DIR"
+        timeout "$TIMEOUT" \
+          python -m experiments.tabular.estimate \
+            --model "${NETWORK}" \
+            --input 0 --output-feature 0 \
+            --shap-variant "${SHAP_VARIANT}" \
+            --estimator "${estimator}" \
+            --out "$OUT_DIR" \
+            --num-samples "1000" \
+            --seed "${seed}" \
+            --silent
         sleep 5s
-        printf "================================================================================\n"
-        printf "Running ${estimator} with seed ${seed}\n"
-        printf "================================================================================\n"
-        
-        # Sampling in individual calls to have the time required for jitting in each call
-        # for a fair comparison with BaB, which also includes the jitting overhead.
-        OUT_DIR="${EXPERIMENT_DIR}/${estimator}/seed_${seed}/1000"
+      done
+
+      for num_samples in $(seq 10000 10000 200000); do
+        OUT_DIR="${EXPERIMENT_DIR}/${estimator}/seed_${seed}/${num_samples}"
         mkdir -p "$OUT_DIR"
         python -m experiments.tabular.estimate \
           --model "${NETWORK}" \
@@ -77,24 +111,18 @@ for estimator in "PermutationSHAP" "LeverageSHAP"; do
           --shap-variant "${SHAP_VARIANT}" \
           --estimator "${estimator}" \
           --out "$OUT_DIR" \
-          --num-samples "1000" \
+          --num-samples "${num_samples}" \
           --seed "${seed}" \
           --silent
 
-        for num_samples in $(seq 10000 10000 160000); do
-          OUT_DIR="${EXPERIMENT_DIR}/${estimator}/seed_${seed}/${num_samples}"
-          mkdir -p "$OUT_DIR"
-          python -m experiments.tabular.estimate \
-            --model "${NETWORK}" \
-            --input 0 --output-feature 0 \
-            --shap-variant "${SHAP_VARIANT}" \
-            --estimator "${estimator}" \
-            --out "$OUT_DIR" \
-            --num-samples "${num_samples}" \
-            --seed "${seed}" \
-            --silent
-        done
+        if [ $? == 124 ]; then
+          echo "Timeout reached for ${estimator} on ${network} with seed ${seed} and ${num_samples} samples"
+          break
+        fi
+        sleep 5s
+      done
     done
+  done
 done
 
 printf "Experiment complete.\n"
