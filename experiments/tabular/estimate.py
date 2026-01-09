@@ -66,7 +66,7 @@ if __name__ == "__main__":
                     )
                     runtimes[n].append(runtime)
                     progress.update(1)
-        except jax.errors.RuntimeError:  # catch out of memory errors
+        except jax.errors.JaxRuntimeError:  # catch out of memory errors
             print("Out of memory error. Stopping experiment.")
         finally:
             logger.log_stats(
