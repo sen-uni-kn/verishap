@@ -70,7 +70,10 @@ class ConsoleLogger(Logger):
         self._log_new_function(function_name)
         stats = stats2 if stats1 is None else stats1 | stats2
         stats = ", ".join(f"{k}: {v}" for k, v in stats.items())
-        print(f"[i: {'/'.join(f'{j:3d}' for j in i)}] {stats}")
+        if isinstance(i, tuple):
+            print(f"[{'/'.join(f'{j:3d}' for j in i)}] {stats}")
+        else:
+            print(f"[i: {i:3d}] {stats}")
 
     def log_bounds(
         self,
