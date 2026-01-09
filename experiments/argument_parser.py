@@ -30,6 +30,7 @@ from . import shaplib
 from .datasets import NIHChestXrayDataset, load_dataset
 from .leverageshap import leverage_shap
 from .models import CNN, MLP
+from .msrshap import linear_msr, tree_msr
 
 
 class NumpyVisionDataset:
@@ -569,6 +570,16 @@ class CmdArgs:
             case "leverageshap":
                 estimator = partial(
                     leverage_shap,
+                    self.model,
+                )
+            case "linearmsr":
+                estimator = partial(
+                    linear_msr,
+                    self.model,
+                )
+            case "treemsr":
+                estimator = partial(
+                    tree_msr,
                     self.model,
                 )
             case _:

@@ -12,11 +12,13 @@ class ModelWrapper:
     """Wraps a model to provide a .predict method that handles
     np.ndarray inputs.
     """
-    def __init__(self, model, batch_size: int = 16384):
+    def __init__(self, model, batch_size: int = 16384, squeeze: bool = False):
         self.wrapper = model_wrapper(model, batch_size)
+        self.squeeze = squeeze
 
     def predict(self, x: np.ndarray) -> np.ndarray:
-        return self.wrapper(x)
+        y = self.wrapper(x)
+        return y.squeeze() if self.squeeze else y
 
 
 def leverage_shap(

@@ -43,6 +43,8 @@ experiments = [
     "seaborn==0.13.2",
     "cmcrameri==1.9.0",
     "colour-science==0.4.7",
+    "xgboost==2.0.3",
+    "numba==0.63.1",
 ]
 test = ["pytest==9.0.1"]
 extra = ["jupyter==1.1.1","tqdm==4.67.1"]
