@@ -16,12 +16,9 @@ def model_wrapper(model, batch_size: int = 16384):
     model = jax.jit(model)
 
     def wrapper(x: np.ndarray) -> np.ndarray:
-        ys = []
-        for i in range(0, x.shape[0], batch_size):
-            batch = x[i:i+batch_size]
-            y = model(batch)
-            ys.append(np.asarray(y))
-        return np.concatenate(ys, axis=0)
+        x = jnp.asarray(x)
+        y = model(x)
+        return np.asarray(y)
 
     return wrapper
 

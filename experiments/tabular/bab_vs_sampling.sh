@@ -57,7 +57,7 @@ for network in "${NETWORKS[@]}"; do
   sleep 15s
 done
 
-for estimator in "KernelSHAP" "PermutationSHAP" "LeverageSHAP"; do
+for estimator in "KernelSHAP" "PermutationSHAP" "LeverageSHAP" "LinearMSR" "TreeMSR"; do
   for network in "${NETWORKS[@]}"; do
     network_filename=$(basename "$network")
     network_name="${network_filename%.*}"
