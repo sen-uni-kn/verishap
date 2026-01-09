@@ -86,8 +86,8 @@ for estimator in "KernelSHAP" "PermutationSHAP" "LeverageSHAP"; do
       
       # Sampling in individual calls to have the time required for jitting in each call
       # for a fair comparison with BaB, which also includes the jitting overhead.
-      sample_sizes="$(seq 1000 1000 9000)\n$(seq 10000 10000 90000)\n$(seq 100000 100000 900000)\n$(seq 1000000 1000000 9000000)\n$(seq 10000000 10000000 90000000)\n$(seq 100000000 100000000 1000000000)"
-      for num_samples in $sample_sizes; do
+      for num_samples in $(seq 1000 1000 9000) $(seq 10000 10000 90000) $(seq 100000 100000 900000) $(seq 1000000 1000000 9000000) $(seq 10000000 10000000 90000000) $(seq 100000000 100000000 1000000000);
+      do
         OUT_DIR="${EXPERIMENT_DIR}/${estimator}/${network_name}/seed_${seed}/${num_samples}"
         mkdir -p "$OUT_DIR"
         timeout "$TIMEOUT" \
