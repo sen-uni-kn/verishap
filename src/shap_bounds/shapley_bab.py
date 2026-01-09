@@ -2,7 +2,6 @@
 import itertools as it
 from dataclasses import dataclass
 from functools import partial
-from time import perf_counter
 from typing import Callable, Literal
 
 import jax
@@ -343,6 +342,7 @@ def shapley_bab(
         jnp.zeros((1,) + base_mask.shape, dtype=base_mask.dtype),
         jnp.expand_dims(without_feature, axis=0),
     )
+
     zero_depth = jnp.zeros((1,), dtype=int)
     total_coaliw = jnp.ones((1,), dtype=base_mask.dtype)
     contrib_lb, contrib_ub, shapley_lb, shapley_ub = compute_bounds(
@@ -361,7 +361,7 @@ def shapley_bab(
     shapley_lb, shapley_ub = root_data.shapley_lb, root_data.shapley_ub
     yield Box(shapley_lb.squeeze(), shapley_ub.squeeze())
     branches: PriorityBranchStore[BranchData] = PriorityBranchStore(
-        selection_priority(root_data), root_data, batch_size
+        selection_priority(root_data).reshape((1,)), root_data, batch_size
     )
     for i in it.count():
         if len(branches) == 0 or jnp.isclose(shapley_lb, shapley_ub):

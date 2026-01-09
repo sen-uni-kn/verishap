@@ -37,6 +37,7 @@ if __name__ == "__main__":
         logger.log_config("cmd_args", args.all_arguments)
         logger.log_config("further_stats", args.further_run_stats)
 
+        runtimes = {}
         for n in tqdm(num_samples, disable=args.silent):
             with timer["estimate"] as timer_context:
                 estims = estimator(num_samples=n)
@@ -47,6 +48,12 @@ if __name__ == "__main__":
                 estim = estims[in_feature, out_feature]
                 estims = {f"{in_feature}": estim.item()}
 
+            runtime = timer_context.runtime
             logger.log_iter_stats(
-                "estimate", n, {"runtime": timer_context.runtime}, **estims
+                "estimate", n, {"runtime": runtime}, **estims
             )
+            runtimes[n] = runtime
+
+        logger.log_stats(
+            "overall", {"runtimes": runtimes}
+        )

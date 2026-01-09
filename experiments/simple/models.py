@@ -13,6 +13,18 @@ class SumOut(eqx.Module):
         return jnp.sum(x).reshape(1)
 
 
+class Linear(eqx.Module):
+    """A linear model."""
+    linear: eqx.nn.Linear
+
+    def __init__(self, input_dim, key):
+        keys = jax.random.split(key, 2)
+        self.linear = eqx.nn.Linear(input_dim, 1, key=keys[0])
+
+    def __call__(self, x: Float[Array, " n"]) -> Float[Array, "1"]:
+        return self.linear(x)
+
+
 class MLP(eqx.Module):
     """Sums out the input dimension."""
 

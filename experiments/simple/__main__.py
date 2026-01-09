@@ -11,7 +11,7 @@ import pandas as pd
 
 from shap_bounds import baseline_value, shapley_bab
 
-from .models import MLP, SumOut
+from .models import MLP, Linear, SumOut
 
 local_output_dir = Path(__file__).parent / "output"
 
@@ -28,6 +28,11 @@ if __name__ == "__main__":
         "--sum",
         action="store_true",
         help="Use a trivial linear model.",
+    )
+    model_group.add_argument(
+        "--linear",
+        action="store_true",
+        help="Use a linear model.",
     )
     parser.add_argument(
         "--input-dim",
@@ -74,6 +79,8 @@ if __name__ == "__main__":
         model = MLP(in_dim, [100, 100], key=jax.random.PRNGKey(0))
     elif args.sum:
         model = SumOut()
+    elif args.linear:
+        model = Linear(in_dim, key=jax.random.PRNGKey(0))
     else:
         raise ValueError(f"Unknown model: {args.model}")
     model = jax.vmap(model)
@@ -86,7 +93,7 @@ if __name__ == "__main__":
     match args.shap_variant:
         case "zero-baseline":
             baseline = jnp.zeros_like(x)
-            value_fn = baseline_value(model, baseline, 0)
+            value_fn = baseline_value(model, x, baseline, 0)
         case _:
             raise ValueError(f"Unknown SHAP variant: {args.shap_variant}")
 
@@ -101,8 +108,10 @@ if __name__ == "__main__":
     for i, (lb, ub) in zip(
         rounds, bounds_method(value_fn, x, in_feature), strict=False
     ):
-        print(f"{i}:", lb, ub)
+        # print(f"{i}:", lb, ub)
         bounds.append((lb.item(), ub.item()))
+
+    print(f"{i}:", lb, ub)
 
     if args.out_file is None:
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
