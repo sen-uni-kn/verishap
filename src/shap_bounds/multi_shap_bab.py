@@ -17,7 +17,6 @@ from .branch_queue import BranchQueue
 from .branch_stack import BranchStack
 from .logger import ConsoleLogger, Logger
 from .priority_branch_store import PriorityBranchStore
-from .timer import Timer
 
 
 @jax.tree_util.register_dataclass
@@ -87,7 +86,6 @@ def multi_shap_bab(
         "smart-branching-ibp-worse",
     ] = "smears",
     batch_size: int = 1024,
-    storage_batch_size: int = 256,
     jit: bool = True,
     log: Logger | bool = True,
 ):

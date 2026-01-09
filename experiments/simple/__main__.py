@@ -2,6 +2,7 @@
 import argparse
 import itertools as it
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 
 import jax
@@ -9,7 +10,7 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-from shap_bounds import baseline_value, shapley_bab
+from shap_bounds import baseline_value, multi_shap_bab, shap_bab
 
 from .models import MLP, Linear, SumOut
 
@@ -55,7 +56,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--bound-method",
         type=str,
-        default="bab",
+        default="shap_bab",
         help="The method to use for computing the bounds.",
     )
     parser.add_argument(
@@ -94,12 +95,17 @@ if __name__ == "__main__":
         case "zero-baseline":
             baseline = jnp.zeros_like(x)
             value_fn = baseline_value(model, x, baseline, 0)
+        case "one-baseline":
+            baseline = jnp.ones_like(x)
+            value_fn = baseline_value(model, x, baseline, 0)
         case _:
             raise ValueError(f"Unknown SHAP variant: {args.shap_variant}")
 
     match args.bound_method:
-        case "bab":
-            bounds_method = shapley_bab
+        case "shap_bab":
+            bounds_method = shap_bab
+        case "multi_shap_bab":
+            bounds_method = partial(multi_shap_bab, batch_size=1, split_strategy="strong-branching-worse")
         case _:
             raise ValueError(f"Unknown bound method: {args.bound_method}")
 

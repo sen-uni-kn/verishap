@@ -79,7 +79,7 @@ def smears(
     return smears
 
 
-def shapley_bab(
+def shap_bab(
     value_fn: Callable[[Real[Array, " b *shape"]], Real[Array, " b"]],
     base_mask: Real[Array, " *shape"],
     feature: tuple[int, ...],
