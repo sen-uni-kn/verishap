@@ -45,9 +45,9 @@ if __name__ == "__main__":
         runtimes = defaultdict(list)
 
         try:
-            progress = tqdm(total=len(seeds) * len(num_samples), disable=args.silent)
-            for seed in seeds:
-                for n in num_samples:
+            progress = tqdm(total=len(seeds) * len(num_samples))
+            for n in num_samples:
+                for seed in seeds:
                     np.random.seed(seed)
                     torch.manual_seed(seed + 1)
                     with timer["estimate"] as timer_context:
