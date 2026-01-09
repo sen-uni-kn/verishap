@@ -24,7 +24,7 @@ class Logger(Protocol):
     ): ...
 
     def log_iter_stats(
-        self, function_name: str, i: int, stats1: dict | None = None, **stats2
+        self, function_name: str, i: int | tuple[int, ...], stats1: dict | None = None, **stats2
     ): ...
 
     def log_bounds(
@@ -65,12 +65,12 @@ class ConsoleLogger(Logger):
             print(", ".join(f"{k}: {v}" for k, v in stats.items()))
 
     def log_iter_stats(
-        self, function_name: str, i: int, stats1: dict | None = None, **stats2
+        self, function_name: str, i: int | tuple[int, ...], stats1: dict | None = None, **stats2
     ):
         self._log_new_function(function_name)
         stats = stats2 if stats1 is None else stats1 | stats2
         stats = ", ".join(f"{k}: {v}" for k, v in stats.items())
-        print(f"[i: {i:3d}] {stats}")
+        print(f"[i: {'/'.join(f'{j:3d}' for j in i)}] {stats}")
 
     def log_bounds(
         self,
@@ -119,12 +119,16 @@ class FileLogger(Logger):
         self.info[function_name] = stats
 
     def log_iter_stats(
-        self, function_name: str, i: int, stats1: dict | None = None, **stats2
+        self, function_name: str, i: int | tuple[int, ...], stats1: dict | None = None, **stats2
     ):
         stats = stats2 if stats1 is None else stats1 | stats2
         if function_name not in self.iter_stats:
             self.iter_stats[function_name] = []
-        self.iter_stats[function_name].append({"iteration": i} | stats)
+        if isinstance(i, int):
+            self.iter_stats[function_name].append({"iteration": i} | stats)
+        else:
+            self.iter_stats[function_name].append({f"iteration_{j}": j for j in i} | stats)
+
 
     def log_bounds(
         self,
@@ -206,7 +210,7 @@ class JoinLoggers(Logger):
             logger.log_stats(function_name, stats1, temporary=temporary, **stats2)
 
     def log_iter_stats(
-        self, function_name: str, i: int, stats1: dict | None = None, **stats2
+        self, function_name: str, i: int | tuple[int, ...], stats1: dict | None = None, **stats2
     ):
         for logger in self.loggers:
             logger.log_iter_stats(function_name, i, stats1, **stats2)

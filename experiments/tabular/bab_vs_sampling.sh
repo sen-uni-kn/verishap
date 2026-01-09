@@ -57,12 +57,10 @@ for network in "${NETWORKS[@]}"; do
   sleep 15s
 done
 
-for estimator in "KernelSHAP" "PermutationSHAP" "LeverageSHAP" "LinearMSR" "TreeMSR"; do
-  for network in "${NETWORKS[@]}"; do
-    network_filename=$(basename "$network")
-    network_name="${network_filename%.*}"
-
-    sleep 15s
+for network in "${NETWORKS[@]}"; do
+  network_filename=$(basename "$network")
+  network_name="${network_filename%.*}"
+  for estimator in "KernelSHAP" "PermutationSHAP" "LeverageSHAP" "LinearMSR" "TreeMSR"; do
     printf "================================================================================\n"
     printf "Running Warmup for ${estimator} on ${network}\n"
     printf "================================================================================\n"
@@ -78,36 +76,24 @@ for estimator in "KernelSHAP" "PermutationSHAP" "LeverageSHAP" "LinearMSR" "Tree
       --num-samples "200" \
       --seed 0
 
-    for seed in $(seq 0 25); do
-      sleep 5s
-      printf "================================================================================\n"
-      printf "Running ${estimator} on ${network} with seed ${seed}\n"
-      printf "================================================================================\n"
-      
-      # Sampling in individual calls to have the time required for jitting in each call
-      # for a fair comparison with BaB, which also includes the jitting overhead.
-      for num_samples in 1000 10000 100000 1000000 10000000;  # larger sample sizes cause OOM errors
-      do
-        OUT_DIR="${EXPERIMENT_DIR}/${estimator}/${network_name}/seed_${seed}/${num_samples}"
-        mkdir -p "$OUT_DIR"
-        timeout "$TIMEOUT" \
-          python -m experiments.tabular.estimate \
-      	    --model "experiments/resources/${network}" \
-            --input 0 --output-feature 0 \
-            --shap-variant "${SHAP_VARIANT}" \
-            --estimator "${estimator}" \
-            --out "$OUT_DIR" \
-            --num-samples "${num_samples}" \
-            --seed "${seed}" \
-            --silent
-        
-        if [ $? == 124 ]; then
-          echo "Timeout reached for ${estimator} on ${network} with seed ${seed} and ${num_samples} samples"
-          break
-        fi
-        sleep 5s
-      done
-    done
+    sleep 5s
+    printf "================================================================================\n"
+    printf "Running ${estimator} on ${network}\n"
+    printf "================================================================================\n"
+    
+    OUT_DIR="${EXPERIMENT_DIR}/${estimator}/${network_name}/seed_${seed}/${num_samples}"
+    mkdir -p "$OUT_DIR"
+    python -m experiments.tabular.estimate \
+      --model "experiments/resources/${network}" \
+      --input 0 --output-feature 0 \
+      --shap-variant "${SHAP_VARIANT}" \
+      --estimator "${estimator}" \
+      --out "$OUT_DIR" \
+      --num-samples 1000,5000,10000,50000,100000,500000,1000000,5000000,10000000 \
+      --seeds $(seq 0 99) \
+      --silent
+    
+    sleep 5s
   done
 done
 
