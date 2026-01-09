@@ -8,14 +8,20 @@ import shap
 from jaxtyping import Array, Bool, Real
 
 
-def model_wrapper(model):
-    """Wraps a model to handle np.ndarray inputs."""
+def model_wrapper(model, batch_size: int = 16384):
+    """Wraps a model to handle np.ndarray inputs.
+
+    Divides the input into batches of size `batch_size` to handle large inputs.
+    """
     model = jax.jit(model)
 
     def wrapper(x: np.ndarray) -> np.ndarray:
-        x = jnp.asarray(x)
-        y = model(x)
-        return np.asarray(y)
+        ys = []
+        for i in range(0, x.shape[0], batch_size):
+            batch = x[i:i+batch_size]
+            y = model(batch)
+            ys.append(np.asarray(y))
+        return np.concatenate(ys, axis=0)
 
     return wrapper
 
@@ -61,12 +67,13 @@ def exact_shap(
     x: Real[Array, " *n"],
     num_samples: int | None = None,
     silent: bool = False,
+    batch_size: int = 16384,
 ) -> Real[Array, " b *n"]:
     """The Exact SHAP explainer from the `shap` library.
 
     Computes exact SHAP values using enumeration.
     """
-    model = model_wrapper(model)
+    model = model_wrapper(model, batch_size)
     x = _preprocess_array(x)
     masker = _preprocess_masker(masker)
 
@@ -77,12 +84,12 @@ def exact_shap(
     return shap_values
 
 
-def kernel_shap(model, baseline, x, num_samples=1024, silent=False):
+def kernel_shap(model, baseline, x, num_samples=1024, silent=False, batch_size: int = 16384):
     """The Kernel SHAP explainer from the `shap` library."""
     if isinstance(baseline, Callable):
         raise ValueError("KernelSHAP does not support callable maskers.")
 
-    model = model_wrapper(model)
+    model = model_wrapper(model, batch_size)
     x = np.asarray(x)
     baseline = _preprocess_array(baseline)
 
@@ -93,9 +100,9 @@ def kernel_shap(model, baseline, x, num_samples=1024, silent=False):
     return shap_values
 
 
-def permutation_shap(model, masker, x, num_samples=1024, silent=False):
+def permutation_shap(model, masker, x, num_samples=1024, silent=False, batch_size: int = 16384):
     """The Permutation SHAP explainer from the `shap` library."""
-    model = model_wrapper(model)
+    model = model_wrapper(model, batch_size)
     x = _preprocess_array(x)
     masker = _preprocess_masker(masker)
 
@@ -111,12 +118,12 @@ def permutation_shap(model, masker, x, num_samples=1024, silent=False):
     return shap_values
 
 
-def sampling_shap(model, baseline, x, num_samples=1024, silent=False):
+def sampling_shap(model, baseline, x, num_samples=1024, silent=False, batch_size: int = 16384):
     """The Sampling SHAP explainer from the `shap` library."""
     if isinstance(baseline, Callable):
         raise ValueError("SamplingSHAP does not support callable baselines.")
 
-    model = model_wrapper(model)
+    model = model_wrapper(model, batch_size)
     x = _preprocess_array(x)
     baseline = _preprocess_array(baseline)
 
