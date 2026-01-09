@@ -16,6 +16,10 @@ from .argument_parser import TabularCmdArgs
 local_output_dir = Path(__file__).parent / "output"
 
 
+class TimeoutError(Exception):
+    pass
+
+
 if __name__ == "__main__":
     args = (
         TabularCmdArgs()
@@ -24,6 +28,7 @@ if __name__ == "__main__":
         .feature_args()
         .shap_variant_args()
         .estimator_args()
+        .timeout_args()
         .logger_args()
         .out_args()
         .parse_args()
@@ -54,6 +59,9 @@ if __name__ == "__main__":
                         estims = estimator(num_samples=n)
                     runtime = timer_context.runtime
 
+                    if args.timeout is not None and runtime > args.timeout:
+                        raise TimeoutError()
+
                     if in_feature is None:
                         estims = estims[:, out_feature].squeeze()
                         estims = {f"{i}": v.item() for i, v in enumerate(estims)}
@@ -68,6 +76,8 @@ if __name__ == "__main__":
                     progress.update(1)
         except jax.errors.RuntimeError:  # catch out of memory errors
             print("Out of memory error. Stopping experiment.")
+        except TimeoutError:
+            print(f"Timeout reached for {n} samples. Stopping experiment.")
         finally:
             logger.log_stats(
                 "overall", {"runtimes": runtimes}
