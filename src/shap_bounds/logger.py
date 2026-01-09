@@ -127,7 +127,7 @@ class FileLogger(Logger):
         if isinstance(i, int):
             self.iter_stats[function_name].append({"iteration": i} | stats)
         else:
-            self.iter_stats[function_name].append({f"iteration_{j}": j for j in i} | stats)
+            self.iter_stats[function_name].append({f"iter_key_{j}": k for j, k in enumerate(i)} | stats)
 
 
     def log_bounds(
