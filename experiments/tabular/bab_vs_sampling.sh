@@ -2,7 +2,7 @@
 HERE="$(dirname "$0")"
 SHAP_VARIANT="${1-marginal}"
 
-TIMEOUT=150
+TIMEOUT=600
 
 BATCH_SIZE=4096
 # Sorted by effective input dimension
@@ -88,6 +88,7 @@ for network in "${NETWORKS[@]}"; do
       --input 0 --output-feature 0 \
       --shap-variant "${SHAP_VARIANT}" \
       --estimator "${estimator}" \
+      --timeout "$TIMEOUT" \
       --out "$OUT_DIR" \
       --num-samples 1000,5000,10000,50000,100000,500000,1000000,5000000,10000000 \
       --seeds $(seq 0 99) \
