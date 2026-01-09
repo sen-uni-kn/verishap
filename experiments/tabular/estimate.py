@@ -1,6 +1,10 @@
 # Copyright 2025 David Boetius
+from collections import defaultdict
 from pathlib import Path
 
+import jax
+import numpy as np
+import torch
 from tqdm import tqdm
 
 from shap_bounds.logger import ConsoleLogger, FileLogger, JoinLoggers
@@ -31,29 +35,40 @@ if __name__ == "__main__":
     loggers = [] if args.silent else [ConsoleLogger()]
     timer = Timer()
 
+    seeds = [args.seed] if args.random_seeds is None else args.random_seeds
     with FileLogger(args.out_dir(local_output_dir)) as file_logger:
         logger = JoinLoggers(*loggers, file_logger)
         logger.log_config("run_details", machine_and_code_details())
         logger.log_config("cmd_args", args.all_arguments)
         logger.log_config("further_stats", args.further_run_stats)
 
-        runtimes = {}
-        for n in tqdm(num_samples, disable=args.silent):
-            with timer["estimate"] as timer_context:
-                estims = estimator(num_samples=n)
-            if in_feature is None:
-                estims = estims[:, out_feature].squeeze()
-                estims = {f"{i}": v.item() for i, v in enumerate(estims)}
-            else:
-                estim = estims[in_feature, out_feature]
-                estims = {f"{in_feature}": estim.item()}
+        runtimes = defaultdict(list)
 
-            runtime = timer_context.runtime
-            logger.log_iter_stats(
-                "estimate", n, {"runtime": runtime}, **estims
+        try:
+            progress = tqdm(total=len(seeds) * len(num_samples), disable=args.silent)
+            for seed in seeds:
+                for n in num_samples:
+                    np.random.seed(seed)
+                    torch.manual_seed(seed + 1)
+                    with timer["estimate"] as timer_context:
+                        estims = estimator(num_samples=n)
+                    runtime = timer_context.runtime
+
+                    if in_feature is None:
+                        estims = estims[:, out_feature].squeeze()
+                        estims = {f"{i}": v.item() for i, v in enumerate(estims)}
+                    else:
+                        estim = estims[in_feature, out_feature]
+                        estims = {f"{in_feature}": estim.item()}
+
+                    logger.log_iter_stats(
+                        "estimate", (n, seed), {"runtime": runtime}, **estims
+                    )
+                    runtimes[n].append(runtime)
+                    progress.update(1)
+        except jax.errors.RuntimeError:  # catch out of memory errors
+            print("Out of memory error. Stopping experiment.")
+        finally:
+            logger.log_stats(
+                "overall", {"runtimes": runtimes}
             )
-            runtimes[n] = runtime
-
-        logger.log_stats(
-            "overall", {"runtimes": runtimes}
-        )

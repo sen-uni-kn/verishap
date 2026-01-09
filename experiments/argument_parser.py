@@ -221,6 +221,14 @@ class CmdArgs:
             type=int,
             help="The random seed to use for the experiment.",
         )
+        self.parser.add_argument(
+            "--seeds",
+            default=None,
+            nargs="+",
+            type=int,
+            help="Multiple random seeds for repeating the experiment. "
+            "If multiple seeds are provided, the experiment will be repeated for each seed.",
+        )
         return self
 
     def timeout_args(self) -> "CmdArgs":
@@ -262,6 +270,10 @@ class CmdArgs:
     @property
     def seed(self) -> int:
         return self.args.seed
+
+    @property
+    def random_seeds(self) -> list[int] | None:
+        return self.args.seeds
 
     @property
     def input(self) -> int:
