@@ -57,12 +57,10 @@ for network in "${NETWORKS[@]}"; do
   sleep 15s
 done
 
-for estimator in "KernelSHAP" "PermutationSHAP" "LeverageSHAP" "LinearMSR" "TreeMSR"; do
-  for network in "${NETWORKS[@]}"; do
-    network_filename=$(basename "$network")
-    network_name="${network_filename%.*}"
-
-    sleep 15s
+for network in "${NETWORKS[@]}"; do
+  network_filename=$(basename "$network")
+  network_name="${network_filename%.*}"
+  for estimator in "KernelSHAP" "PermutationSHAP" "LeverageSHAP" "LinearMSR" "TreeMSR"; do
     printf "================================================================================\n"
     printf "Running Warmup for ${estimator} on ${network}\n"
     printf "================================================================================\n"
