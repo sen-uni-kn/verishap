@@ -50,7 +50,8 @@ if __name__ == "__main__":
         runtimes = defaultdict(list)
 
         try:
-            progress = tqdm(total=len(seeds) * len(num_samples))
+            total = sum([n * len(seeds) for n in num_samples])
+            progress = tqdm(total=total)
             for n in num_samples:
                 for seed in seeds:
                     np.random.seed(seed)
@@ -73,7 +74,7 @@ if __name__ == "__main__":
                         "estimate", (n, seed), {"runtime": runtime}, **estims
                     )
                     runtimes[n].append(runtime)
-                    progress.update(1)
+                    progress.update(n)
         except jax.errors.JaxRuntimeError:  # catch out of memory errors
             print("Out of memory error. Stopping experiment.")
         except TimeoutError:
