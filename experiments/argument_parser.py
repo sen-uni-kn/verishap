@@ -28,9 +28,8 @@ from shap_bounds.logger import Logger
 
 from . import shaplib
 from .datasets import NIHChestXrayDataset, load_dataset
-from .leverageshap import leverage_shap
 from .models import CNN, MLP
-from .msrshap import linear_msr, tree_msr
+from .msrshap import leverage_shap, linear_msr, tree_msr
 
 
 class NumpyVisionDataset:
@@ -548,6 +547,38 @@ class CmdArgs:
         return self.args.timeout
 
     def estimator(self) -> Callable:
+        seed = self.args.seed
+        np.random.seed(seed)
+        torch.manual_seed(seed + 1)
+
+        match (
+            self.args.estimator.lower()
+            .replace("-", "")
+            .replace("_", "")
+            .replace(" ", "")
+        ):
+            case "linearmsr":
+                return partial(
+                    linear_msr,
+                    self.value_function,
+                    self.base_mask,
+                    seed=seed,
+                )
+            case "treemsr":
+                return partial(
+                    tree_msr,
+                    self.value_function,
+                    self.base_mask,
+                    seed=seed,
+                )
+            case "leverageshap":
+                return partial(
+                    leverage_shap,
+                    self.value_function,
+                    self.base_mask,
+                    seed=seed,
+                )
+
         shap_variant = self.shap_variant
         match (
             self.args.estimator.lower()
@@ -584,16 +615,6 @@ class CmdArgs:
                     leverage_shap,
                     self.model,
                 )
-            case "linearmsr":
-                estimator = partial(
-                    linear_msr,
-                    self.model,
-                )
-            case "treemsr":
-                estimator = partial(
-                    tree_msr,
-                    self.model,
-                )
             case _:
                 raise ValueError(f"Unknown SHAP estimator: {self.args.estimator}")
 
@@ -626,9 +647,6 @@ class CmdArgs:
             case _:
                 raise ValueError(f"Unknown SHAP variant: {self.args.shap_variant}")
 
-        seed = self.args.seed
-        np.random.seed(seed)
-        torch.manual_seed(seed + 1)
         return estimator
 
     @property

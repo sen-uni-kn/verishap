@@ -8,11 +8,8 @@ import shap
 from jaxtyping import Array, Bool, Real
 
 
-def model_wrapper(model, batch_size: int = 16384):
-    """Wraps a model to handle np.ndarray inputs.
-
-    Divides the input into batches of size `batch_size` to handle large inputs.
-    """
+def model_wrapper(model):
+    """Wraps a model to handle np.ndarray inputs."""
     model = jax.jit(model)
 
     def wrapper(x: np.ndarray) -> np.ndarray:
@@ -64,13 +61,12 @@ def exact_shap(
     x: Real[Array, " *n"],
     num_samples: int | None = None,
     silent: bool = False,
-    batch_size: int = 16384,
 ) -> Real[Array, " b *n"]:
     """The Exact SHAP explainer from the `shap` library.
 
     Computes exact SHAP values using enumeration.
     """
-    model = model_wrapper(model, batch_size)
+    model = model_wrapper(model)
     x = _preprocess_array(x)
     masker = _preprocess_masker(masker)
 
@@ -81,12 +77,12 @@ def exact_shap(
     return shap_values
 
 
-def kernel_shap(model, baseline, x, num_samples=1024, silent=False, batch_size: int = 16384):
+def kernel_shap(model, baseline, x, num_samples=1024, silent=False):
     """The Kernel SHAP explainer from the `shap` library."""
     if isinstance(baseline, Callable):
         raise ValueError("KernelSHAP does not support callable maskers.")
 
-    model = model_wrapper(model, batch_size)
+    model = model_wrapper(model)
     x = np.asarray(x)
     baseline = _preprocess_array(baseline)
 
@@ -97,9 +93,9 @@ def kernel_shap(model, baseline, x, num_samples=1024, silent=False, batch_size: 
     return shap_values
 
 
-def permutation_shap(model, masker, x, num_samples=1024, silent=False, batch_size: int = 16384):
+def permutation_shap(model, masker, x, num_samples=1024, silent=False):
     """The Permutation SHAP explainer from the `shap` library."""
-    model = model_wrapper(model, batch_size)
+    model = model_wrapper(model)
     x = _preprocess_array(x)
     masker = _preprocess_masker(masker)
 
@@ -115,12 +111,12 @@ def permutation_shap(model, masker, x, num_samples=1024, silent=False, batch_siz
     return shap_values
 
 
-def sampling_shap(model, baseline, x, num_samples=1024, silent=False, batch_size: int = 16384):
+def sampling_shap(model, baseline, x, num_samples=1024, silent=False):
     """The Sampling SHAP explainer from the `shap` library."""
     if isinstance(baseline, Callable):
         raise ValueError("SamplingSHAP does not support callable baselines.")
 
-    model = model_wrapper(model, batch_size)
+    model = model_wrapper(model)
     x = _preprocess_array(x)
     baseline = _preprocess_array(baseline)
 

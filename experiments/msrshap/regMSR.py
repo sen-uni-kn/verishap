@@ -45,13 +45,13 @@ def get_fit(X_flat, y_flat, weighting, regression_adj):
     return reg_model, phi
 
 class UniversalMSR(BaseEstimator):
-    def __init__(self, model, baseline, weighting, reg_model_class=False, return_direct=False):
+    def __init__(self, model, baseline, weighting, reg_model_class=False, return_direct=False, seed=None):
         super().__init__(model, baseline, weighting)
         self.n = self.baseline.shape[1]
         self.p = get_p(self.n, weighting)
         self.model = model
         self.baseline = baseline
-        self.gen = np.random.Generator(np.random.PCG64())
+        self.gen = np.random.Generator(np.random.PCG64(seed))
         self.reg_model_class = reg_model_class
         self.sample_prob = self.p * scipy.special.binom(self.n-1, np.arange(self.n))
         self.split_samples = False

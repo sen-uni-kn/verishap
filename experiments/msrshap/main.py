@@ -1,47 +1,64 @@
 #  Copyright (c) 2025. David Boetius.
 from typing import Callable
 
+import numpy as np
 from jaxtyping import Array, Real
 
-from ..leverageshap import ModelWrapper
-from ..shaplib import _preprocess_array
+from ..shaplib import model_wrapper
+from .lshap import LeverageSHAPEstimator
 from .regMSR import LinearMSR, TreeMSR
 
 
-def reg_msr(
-    model: Callable[[Real[Array, " b *n"]], Real[Array, " b m"]],
-    baseline: Real[Array, " d *n"],
-    x: Real[Array, " *n"],
+class Wrapper:
+    """Wraps a model or value function to provide a .predict method that handles
+    np.ndarray inputs.
+    """
+    def __init__(self, model, squeeze: bool = True):
+        self.wrapper = model_wrapper(model)
+        self.squeeze = squeeze
+
+    def predict(self, x: np.ndarray) -> np.ndarray:
+        y = self.wrapper(x)
+        return y.squeeze() if self.squeeze else y
+
+
+def run_estimator(
+    value_function: Callable[[Real[Array, " b *n"], Real[Array, " *n"]], Real[Array, " d"]],
+    base_mask: Real[Array, " *n"],
     explainer_class,
     num_samples: int | None = None,
-    batch_size: int = 16384,
+    seed: int | None = None,
 ):
-    if isinstance(baseline, Callable):
-        raise ValueError("KernelSHAP does not support callable maskers.")
+    model = Wrapper(value_function, squeeze=True)
+    x = np.ones((1, *base_mask.shape), dtype=base_mask.dtype)
+    baseline = np.zeros((1, *base_mask.shape), dtype=base_mask.dtype)
 
-    model = ModelWrapper(model, batch_size, squeeze=True)
-    x = _preprocess_array(x)
-    baseline = _preprocess_array(baseline)
-
-    explainer = explainer_class(model, baseline, weighting="shapley")
+    explainer = explainer_class(model, baseline, weighting="shapley", seed=seed)
     return explainer.explain(x, num_samples).reshape(-1, 1)
 
 
 def linear_msr(
-    model: Callable[[Real[Array, " b *n"]], Real[Array, " b m"]],
-    baseline: Real[Array, " d *n"],
-    x: Real[Array, " *n"],
+    value_function: Callable[[Real[Array, " b *n"], Real[Array, " *n"]], Real[Array, " d"]],
+    base_mask: Real[Array, " *n"],
     num_samples: int | None = None,
-    batch_size: int = 16384,
+    seed: int | None = None,
 ):
-    return reg_msr(model, baseline, x, LinearMSR, num_samples, batch_size)
+    return run_estimator(value_function, base_mask, LinearMSR, num_samples, seed)
 
 
 def tree_msr(
-    model: Callable[[Real[Array, " b *n"]], Real[Array, " b m"]],
-    baseline: Real[Array, " d *n"],
-    x: Real[Array, " *n"],
+    value_function: Callable[[Real[Array, " b *n"], Real[Array, " *n"]], Real[Array, " d"]],
+    base_mask: Real[Array, " *n"],
     num_samples: int | None = None,
-    batch_size: int = 16384,
+    seed: int | None = None,
 ):
-    return reg_msr(model, baseline, x, TreeMSR, num_samples, batch_size)
+    return run_estimator(value_function, base_mask, TreeMSR, num_samples, seed)
+
+
+def leverage_shap(
+    value_function: Callable[[Real[Array, " b *n"], Real[Array, " *n"]], Real[Array, " d"]],
+    base_mask: Real[Array, " *n"],
+    num_samples: int | None = None,
+    seed: int | None = None,
+):
+    return run_estimator(value_function, base_mask, LeverageSHAPEstimator, num_samples, seed)

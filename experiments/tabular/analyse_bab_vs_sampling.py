@@ -298,6 +298,7 @@ def _plot_error_summary(
     ticks: list[float],
     is_exact: bool,
     last_bound_half_width: float,
+    y_axis_scale: str,
     title: str | None = None,
 ) -> None:
     estimator_order = list(error_summary["estimator"].unique())
@@ -330,7 +331,7 @@ def _plot_error_summary(
             label=f"{estimator} (seed {seed})",
         )
     ax.set_xscale("log")
-    ax.set_yscale("log")
+    ax.set_yscale("log" if y_axis_scale == "log" else "linear")
     if ticks:
         ticks_sorted = list(ticks)
         if exact_tick is not None:
@@ -347,7 +348,7 @@ def _plot_error_summary(
                 labels.append(f"{percent:.0f}% output")
         ax.set_yticklabels(labels)
         ax_right = ax.twinx()
-        ax_right.set_yscale("log")
+        ax_right.set_yscale("log" if y_axis_scale == "log" else "linear")
         ax_right.set_ylim(y_min, y_max)
         ax_right.set_yticks(ticks_sorted)
         runtime_labels = []
@@ -390,6 +391,7 @@ def _plot_network(
     multi_networks: bool,
     error_agg: str,
     highlight_seed: str | None,
+    y_axis_scale: str,
 ) -> plt.Figure | None:
     bounds, true_values, last_bound_half_width = _load_bab_final_bounds(
         run_dir, network
@@ -452,6 +454,7 @@ def _plot_network(
         ticks,
         is_exact,
         last_bound_half_width,
+        y_axis_scale,
         title=f"Sampling error vs. BaB midpoint for {network}",
     )
     fig.tight_layout()
@@ -466,6 +469,7 @@ def _plot_network_all_features(
     multi_networks: bool,
     error_agg: str,
     highlight_seed: str | None,
+    y_axis_scale: str,
 ) -> plt.Figure | None:
     return _plot_network(
         run_dir,
@@ -475,24 +479,21 @@ def _plot_network_all_features(
         multi_networks,
         error_agg,
         highlight_seed,
+        y_axis_scale,
     )
 
 
 def main(
     run_dir: Path,
     network: str | None,
-    feature: int | None,
     out_name: str,
     sampling_estimators: list[str] | None,
     all_networks: bool,
     include_bab: bool,
     error_agg: str,
     highlight_seed: str | None,
+    y_axis_scale: str,
 ) -> None:
-    if feature is not None:
-        raise SystemExit(
-            "This analysis aggregates errors across all features. Use --feature all."
-        )
     if (
         sampling_estimators is None
         or any(estimator.lower() == "all" for estimator in sampling_estimators)
@@ -509,26 +510,16 @@ def main(
     networks = _collect_networks(run_dir, estimators, network, all_networks, include_bab)
     figures = []
     for net in networks:
-        if feature is None:
-            fig = _plot_network_all_features(
-                run_dir,
-                net,
-                out_name,
-                estimators,
-                all_networks,
-                error_agg,
-                highlight_seed,
-            )
-        else:
-            fig = _plot_network(
-                run_dir,
-                net,
-                out_name,
-                estimators,
-                all_networks,
-                error_agg,
-                highlight_seed,
-            )
+        fig = _plot_network_all_features(
+            run_dir,
+            net,
+            out_name,
+            estimators,
+            all_networks,
+            error_agg,
+            highlight_seed,
+            y_axis_scale,
+        )
         if fig is not None:
             figures.append(fig)
     if figures:
@@ -552,12 +543,6 @@ if __name__ == "__main__":
         type=str,
         required=True,
         help="Network name inside the run directory, or 'all'.",
-    )
-    parser.add_argument(
-        "--feature",
-        type=str,
-        required=True,
-        help="Must be 'all' (errors aggregate across all features).",
     )
     parser.add_argument(
         "--out-name",
@@ -590,20 +575,25 @@ if __name__ == "__main__":
         default=None,
         help="Seed to highlight for each estimator (falls back to first if missing).",
     )
+    parser.add_argument(
+        "--y-axis",
+        type=str,
+        default="lin",
+        choices=["lin", "log"],
+        help="Scale to use for the error axis (linear default, or log).",
+    )
     args = parser.parse_args()
     networks_arg = args.networks
     all_networks = networks_arg.lower() == "all"
     network = None if all_networks else networks_arg
-    feature_arg = args.feature
-    feature = None if feature_arg.lower() == "all" else int(feature_arg)
     main(
         args.run_dir,
         network,
-        feature,
         args.out_name,
         args.sampling_estimator,
         all_networks,
         not args.estimators_only,
         args.error_agg,
         args.highlight_seed,
+        args.y_axis,
     )
