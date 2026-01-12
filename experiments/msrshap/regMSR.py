@@ -196,17 +196,17 @@ class UniversalMSR(BaseEstimator):
         return phi
 
 class LinearMSR(UniversalMSR):
-    def __init__(self, model, baseline, weighting):
-        super().__init__(model, baseline, weighting, reg_model_class='linear')
+    def __init__(self, model, baseline, weighting, seed=None):
+        super().__init__(model, baseline, weighting, reg_model_class='linear', seed=seed)
 
 class TreeMSR(UniversalMSR):
-    def __init__(self, model, baseline, weighting):
-        super().__init__(model, baseline, weighting, reg_model_class='tree')
+    def __init__(self, model, baseline, weighting, seed=None):
+        super().__init__(model, baseline, weighting, reg_model_class='tree', seed=seed)
 
 class Tree(UniversalMSR):
-    def __init__(self, model, baseline, weighting):
-        super().__init__(model, baseline, weighting, reg_model_class='tree', return_direct=True)
+    def __init__(self, model, baseline, weighting, seed=None):
+        super().__init__(model, baseline, weighting, reg_model_class='tree', return_direct=True, seed=seed)
 
 class MSR(UniversalMSR):
-    def __init__(self, model, baseline, weighting):
-        super().__init__(model, baseline, weighting, reg_model_class=False)
+    def __init__(self, model, baseline, weighting, seed=None):
+        super().__init__(model, baseline, weighting, reg_model_class=False, seed=seed)
