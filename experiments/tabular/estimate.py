@@ -33,7 +33,6 @@ if __name__ == "__main__":
         .out_args()
         .parse_args()
     )
-    estimator = args.estimator()
     in_feature, out_feature = args.feature, args.output_feature
     num_samples = args.num_samples
 
@@ -54,10 +53,9 @@ if __name__ == "__main__":
             progress = tqdm(total=total)
             for n in num_samples:
                 for seed in seeds:
-                    np.random.seed(seed)
-                    torch.manual_seed(seed + 1)
+                    estimator = args.estimator(seed=seed)
                     with timer["estimate"] as timer_context:
-                        estims = estimator(num_samples=n)
+                        estims = estimator(num_samples=n, seed=seed)
                     runtime = timer_context.runtime
 
                     if args.timeout is not None and runtime > args.timeout:

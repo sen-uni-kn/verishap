@@ -10,8 +10,8 @@ NETWORKS=(
   "mushroom-mlp-8x1.eqx"
   "default-mlp-64x3.eqx"
   "automobile-mlp-32x2.eqx"
-  # "steel-mlp-8x2.eqx"
-  # "breast_cancer-mlp-32x2.eqx"
+  "steel-mlp-8x2.eqx"
+  "breast_cancer-mlp-32x2.eqx"
   "annealing-mlp-32x2.eqx"
   "sonar-mlp-32x2.eqx"
 )
@@ -22,40 +22,41 @@ then
 fi
 EXPERIMENT_DIR="$HERE/output/bab_vs_sampling/${SHAP_VARIANT}_${TIMESTAMP}"
 
-for network in "${NETWORKS[@]}"; do
-  network_filename=$(basename "$network")
-  network_name="${network_filename%.*}"
-
-  printf "\n\nRunning Warmup for Branch and Bound on ${network}...\n"
-
-  OUT_DIR="${EXPERIMENT_DIR}/warmup/BaB/${network_name}"
-  mkdir -p "$OUT_DIR"
-  python -m experiments.tabular.bound \
-    --model "experiments/resources/${network}" \
-    --input 0 --output-feature 0 \
-    --shap-variant "${SHAP_VARIANT}" \
-    --bound-method "bab" \
-    --bound-options "batch_size=$BATCH_SIZE" \
-    --out "$OUT_DIR" \
-    --max-iters 2 \
-    --timeout "$TIMEOUT"
-
-  sleep 15s
-  printf "\n\nRunning Branch and Bound on ${network}...\n"
-
-  OUT_DIR="${EXPERIMENT_DIR}/BaB/${network_name}"
-  mkdir -p "$OUT_DIR"
-  python -m experiments.tabular.bound \
-    --model "experiments/resources/${network}" \
-    --input 0 --output-feature 0 \
-    --shap-variant "${SHAP_VARIANT}" \
-    --bound-method "bab" \
-    --bound-options "batch_size=$BATCH_SIZE" \
-    --out "$OUT_DIR" \
-    --timeout "$TIMEOUT" \
-    --silent
-  sleep 15s
-done
+# Just use the results from ./compare_to_exactshap.sh
+# for network in "${NETWORKS[@]}"; do
+#   network_filename=$(basename "$network")
+#   network_name="${network_filename%.*}"
+# 
+#   printf "\n\nRunning Warmup for Branch and Bound on ${network}...\n"
+# 
+#   OUT_DIR="${EXPERIMENT_DIR}/warmup/BaB/${network_name}"
+#   mkdir -p "$OUT_DIR"
+#   python -m experiments.tabular.bound \
+#     --model "experiments/resources/${network}" \
+#     --input 0 --output-feature 0 \
+#     --shap-variant "${SHAP_VARIANT}" \
+#     --bound-method "bab" \
+#     --bound-options "batch_size=$BATCH_SIZE" \
+#     --out "$OUT_DIR" \
+#     --max-iters 2 \
+#     --timeout "$TIMEOUT"
+# 
+#   sleep 15s
+#   printf "\n\nRunning Branch and Bound on ${network}...\n"
+# 
+#   OUT_DIR="${EXPERIMENT_DIR}/BaB/${network_name}"
+#   mkdir -p "$OUT_DIR"
+#   python -m experiments.tabular.bound \
+#     --model "experiments/resources/${network}" \
+#     --input 0 --output-feature 0 \
+#     --shap-variant "${SHAP_VARIANT}" \
+#     --bound-method "bab" \
+#     --bound-options "batch_size=$BATCH_SIZE" \
+#     --out "$OUT_DIR" \
+#     --timeout "$TIMEOUT" \
+#     --silent
+#   sleep 15s
+# done
 
 for network in "${NETWORKS[@]}"; do
   network_filename=$(basename "$network")

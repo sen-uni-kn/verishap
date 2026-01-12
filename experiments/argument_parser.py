@@ -546,8 +546,9 @@ class CmdArgs:
     def timeout(self) -> float | None:
         return self.args.timeout
 
-    def estimator(self) -> Callable:
-        seed = self.args.seed
+    def estimator(self, seed: int | None = None) -> Callable:
+        if seed is None:
+            seed = self.args.seed
         np.random.seed(seed)
         torch.manual_seed(seed + 1)
 

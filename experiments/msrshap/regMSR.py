@@ -24,7 +24,7 @@ class NullModel:
     def predict(self, X):
         return np.zeros(X.shape[0])
 
-def get_fit(X_flat, y_flat, weighting, regression_adj):
+def get_fit(X_flat, y_flat, weighting, regression_adj, seed=None):
     n = X_flat.shape[1]
     if regression_adj is False:
         reg_model = NullModel()
@@ -34,7 +34,7 @@ def get_fit(X_flat, y_flat, weighting, regression_adj):
         phi_method = lambda reg_model: reg_model.coef_
     elif regression_adj == "tree":
         #reg_model = sklearn.ensemble.RandomForestRegressor()
-        reg_model = xgboost.XGBRegressor()
+        reg_model = xgboost.XGBRegressor(random_state=seed)
         phi_method = lambda reg_model: tree_prob(np.zeros((1,n)), np.ones((1,n)), reg_model, weighting)[0].squeeze()
     else:
         raise ValueError("regression_adjustment must be False, 'linear', or 'tree'")
@@ -52,6 +52,7 @@ class UniversalMSR(BaseEstimator):
         self.model = model
         self.baseline = baseline
         self.gen = np.random.Generator(np.random.PCG64(seed))
+        self.fitting_seed = seed + 1 if seed is not None else None
         self.reg_model_class = reg_model_class
         self.sample_prob = self.p * scipy.special.binom(self.n-1, np.arange(self.n))
         self.split_samples = False
@@ -122,7 +123,7 @@ class UniversalMSR(BaseEstimator):
         feature_names = [f"f{i}" for i in range(model_input.shape[1])]
         X_train_df = pd.DataFrame(X_train, columns=feature_names)
         X_test_df = pd.DataFrame(X_test, columns=feature_names)
-        reg_model, reg_phi = get_fit(X_train_df, y_train, self.weighting, self.reg_model_class)        
+        reg_model, reg_phi = get_fit(X_train_df, y_train, self.weighting, self.reg_model_class, self.fitting_seed)
         reg_pred = reg_model.predict(X_test_df)
 
         if self.return_direct:
