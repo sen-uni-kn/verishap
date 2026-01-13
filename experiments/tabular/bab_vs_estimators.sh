@@ -79,20 +79,22 @@ for network in "${NETWORKS[@]}"; do
     printf "Running ${estimator} on ${network}\n"
     printf "================================================================================\n"
     
-    OUT_DIR="${EXPERIMENT_DIR}/${estimator}/${network_name}/"
-    mkdir -p "$OUT_DIR"
-    python -m experiments.tabular.estimate \
-      --model "experiments/resources/${network}" \
-      --input 0 --output-feature 0 \
-      --shap-variant "${SHAP_VARIANT}" \
-      --estimator "${estimator}" \
-      --timeout "$TIMEOUT" \
-      --out "$OUT_DIR" \
-      --num-samples 1000,2782,7742,21544,59948,166810,464158,1291549,3593813,10000000 \
-      --seeds $(seq 0 99) \
-      --silent
-    
-    sleep 5s
+    for i in {1..5}; do # repeat runtime measurements five times
+      OUT_DIR="${EXPERIMENT_DIR}/${estimator}/${network_name}/repeatition_${i}"
+      mkdir -p "$OUT_DIR"
+      python -m experiments.tabular.estimate \
+        --model "experiments/resources/${network}" \
+        --input 0 --output-feature 0 \
+        --shap-variant "${SHAP_VARIANT}" \
+        --estimator "${estimator}" \
+        --timeout "$TIMEOUT" \
+        --out "$OUT_DIR" \
+        --num-samples 1000,2782,7742,21544,59948,166810,464158,1291549,3593813,10000000 \
+        --seeds $(seq 0 99) \
+        --silent
+      
+      sleep 5s
+    done
   done
 done
 
