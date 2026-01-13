@@ -35,6 +35,7 @@ if __name__ == "__main__":
     )
     in_feature, out_feature = args.feature, args.output_feature
     num_samples = args.num_samples
+    estimator = args.estimator()
 
     loggers = [] if args.silent else [ConsoleLogger()]
     timer = Timer()
@@ -53,7 +54,6 @@ if __name__ == "__main__":
             progress = tqdm(total=total)
             for n in num_samples:
                 for seed in seeds:
-                    estimator = args.estimator(seed=seed)
                     with timer["estimate"] as timer_context:
                         estims = estimator(num_samples=n, seed=seed)
                     runtime = timer_context.runtime

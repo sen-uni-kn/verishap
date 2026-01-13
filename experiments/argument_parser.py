@@ -546,12 +546,7 @@ class CmdArgs:
     def timeout(self) -> float | None:
         return self.args.timeout
 
-    def estimator(self, seed: int | None = None) -> Callable:
-        if seed is None:
-            seed = self.args.seed
-        np.random.seed(seed)
-        torch.manual_seed(seed + 1)
-
+    def estimator(self) -> Callable:
         match (
             self.args.estimator.lower()
             .replace("-", "")
@@ -563,21 +558,18 @@ class CmdArgs:
                     linear_msr,
                     self.value_function,
                     self.base_mask,
-                    seed=seed,
                 )
             case "treemsr":
                 return partial(
                     tree_msr,
                     self.value_function,
                     self.base_mask,
-                    seed=seed,
                 )
             case "leverageshap":
                 return partial(
                     leverage_shap,
                     self.value_function,
                     self.base_mask,
-                    seed=seed,
                 )
 
         shap_variant = self.shap_variant
@@ -648,7 +640,14 @@ class CmdArgs:
             case _:
                 raise ValueError(f"Unknown SHAP variant: {self.args.shap_variant}")
 
-        return estimator
+        def with_seeding(*args, seed: int | None = None, **kwargs) -> Callable:
+            if seed is None:
+                seed = self.args.seed
+                np.random.seed(seed)
+            torch.manual_seed(seed + 1)
+            return estimator(*args, **kwargs)
+
+        return with_seeding
 
     @property
     def num_samples(self) -> list:
