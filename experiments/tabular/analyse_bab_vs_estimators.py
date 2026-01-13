@@ -125,6 +125,64 @@ def _load_bab_runtime_thresholds(
     return runtimes
 
 
+def _load_bab_all_runtime_thresholds(
+    run_dir: Path,
+    network: str,
+    output_scale: float,
+) -> pd.DataFrame:
+    """Load BaB runtimes for all iterations with their half-widths."""
+    bounds_path = run_dir / "BaB" / network / "multi_shap_bab_bounds.feather"
+    if not bounds_path.exists():
+        return pd.DataFrame()
+    bounds = pd.read_feather(bounds_path)
+    if "runtime" not in bounds.columns:
+        return pd.DataFrame()
+    feature_keys = []
+    for feature_key in bounds.columns.get_level_values(0).unique():
+        if (feature_key, "lb") in bounds.columns and (
+            feature_key,
+            "ub",
+        ) in bounds.columns:
+            feature_keys.append(feature_key)
+    if not feature_keys:
+        return pd.DataFrame()
+    lbs = np.array([bounds[(key, "lb")] for key in feature_keys]).T
+    ubs = np.array([bounds[(key, "ub")] for key in feature_keys]).T
+    half_width = (ubs - lbs) / 2.0
+    max_half_width = half_width.max(axis=1)
+    result = pd.DataFrame({
+        "iteration": np.arange(len(max_half_width)),
+        "runtime": bounds["runtime"].to_numpy(),
+        "max_half_width": max_half_width,
+        "max_half_width_pct": (max_half_width / output_scale) * 100.0,
+    })
+    return result
+
+
+def _load_estimator_runtimes(
+    run_dir: Path,
+    estimator: str,
+    network: str,
+) -> dict[int, float]:
+    """Load total runtime for each num_samples from estimator info.yaml."""
+    info_path = run_dir / estimator / network / "info.yaml"
+    if not info_path.exists():
+        return {}
+    with info_path.open("r") as handle:
+        info = yaml.safe_load(handle)
+    runtimes_dict = info.get("overall", {}).get("runtimes", {})
+    result = {}
+    for num_samples_str, runtime_list in runtimes_dict.items():
+        try:
+            num_samples = int(num_samples_str)
+            # Sum all runtimes for this num_samples (across all seeds)
+            total_runtime = sum(runtime_list)
+            result[num_samples] = total_runtime
+        except (ValueError, TypeError):
+            continue
+    return result
+
+
 def _compute_output_ticks(output_scale: float, max_error: float) -> list[float]:
     if output_scale <= 0:
         return []
@@ -199,12 +257,16 @@ def _compute_aggregated_error(
     if use_bounds:
         lower = np.array([bounds[col][0] for col in feature_cols])
         upper = np.array([bounds[col][1] for col in feature_cols])
-        # Optimistic error calculation
+        # Per-feature half-widths
+        half_widths = (upper - lower) / 2.0
+        # Distance to bounds (optimistic error)
         errors = np.where(
             values < lower,
             lower - values,
             np.where(values > upper, values - upper, 0.0),
         )
+        # Add per-feature half-width to account for BaB uncertainty
+        errors = errors + half_widths
     else:
         errors = np.abs(values - true_vals)
     if agg_mode == "l1":
@@ -365,10 +427,29 @@ def _merge_highlight_columns(
 ) -> pd.DataFrame:
     if highlight_vals.empty:
         return data
-    pivot = highlight_vals.pivot(index="num_samples", columns="estimator", values="error")
+    pivot = highlight_vals.pivot(
+        index="num_samples", columns="estimator", values="error"
+    )
     pivot = pivot.rename(columns=lambda est: f"{est}_highlight_error")
     pivot = pivot.reset_index()
     return data.merge(pivot, on="num_samples", how="left")
+
+
+def _merge_runtime_columns(
+    data: pd.DataFrame,
+    estimators: list[str],
+    estimator_runtimes: dict[str, dict[int, float]],
+) -> pd.DataFrame:
+    """Add estimator runtime columns to the data."""
+    for estimator in estimators:
+        runtimes = estimator_runtimes.get(estimator, {})
+        if not runtimes:
+            continue
+        runtime_series = pd.Series(runtimes, name=f"{estimator}_total_runtime")
+        runtime_series.index.name = "num_samples"
+        runtime_series = runtime_series.reset_index()
+        data = data.merge(runtime_series, on="num_samples", how="left")
+    return data
 
 
 def _dump_network_data(
@@ -378,6 +459,9 @@ def _dump_network_data(
     highlight: str | None,
     summary: pd.DataFrame,
     highlight_vals: pd.DataFrame,
+    estimators: list[str],
+    estimator_runtimes: dict[str, dict[int, float]],
+    bab_runtime_data: pd.DataFrame,
 ) -> None:
     if summary.empty and highlight_vals.empty:
         return
@@ -389,8 +473,15 @@ def _dump_network_data(
     dump_path = run_dir / dump_name
     data = _build_wide_summary(summary)
     data = _merge_highlight_columns(data, highlight_vals)
+    data = _merge_runtime_columns(data, estimators, estimator_runtimes)
     dump_path.parent.mkdir(parents=True, exist_ok=True)
     data.to_csv(dump_path, index=False)
+
+    # Also dump BaB runtime data
+    if not bab_runtime_data.empty:
+        bab_dump_name = f"{safe_network}_bab_runtimes.csv"
+        bab_dump_path = run_dir / bab_dump_name
+        bab_runtime_data.to_csv(bab_dump_path, index=False)
 
 
 def _plot_error_summary(
@@ -418,7 +509,9 @@ def _plot_error_summary(
     )
     if area_mode != "none":
         area_label = (
-            "range" if area_mode == "range" or area_alpha is None else f"CI α={area_alpha:g}"
+            "range"
+            if area_mode == "range" or area_alpha is None
+            else f"CI α={area_alpha:g}"
         )
         for estimator, group in error_summary.groupby("estimator"):
             group = group.sort_values("num_samples")
@@ -481,16 +574,31 @@ def _plot_error_summary(
                 runtime_labels.append(f"{runtime:.0f}s")
             else:
                 runtime_labels.append(f"{runtime:.1f}s")
-        ax_right.set_yticklabels(runtime_labels)
-        ax_right.set_ylabel("BaB runtime to reach error")
+        ax_right.set_yticklabels(runtime_labels, fontsize=12, fontweight="bold")
+        ax_right.set_ylabel("BaB runtime to reach error", fontsize=12, fontweight="bold")
+    bab_color = "#8B0000"  # Dark red for BaB results
     if not is_exact and last_bound_half_width > 0:
         ax.axhline(
             last_bound_half_width,
-            color="black",
+            color=bab_color,
             linestyle="--",
-            linewidth=1.2,
-            zorder=1,
+            linewidth=3.0,
+            zorder=3,
             label="BaB last bound",
+        )
+        # Add uncertainty bar - use a solid horizontal band at the BaB bound level
+        # that's more visible on log scale
+        x_min, x_max = ax.get_xlim()
+        bar_thickness = last_bound_half_width * 0.5  # Make it visually substantial
+        ax.axhspan(
+            max(last_bound_half_width - bar_thickness, y_min * 1.01),
+            last_bound_half_width,
+            color=bab_color,
+            alpha=0.4,
+            edgecolor=bab_color,
+            linewidth=2.0,
+            zorder=2,
+            label="BaB uncertainty",
         )
     ax.set_xlabel("Number of samples")
     ax.set_ylabel(f"Aggregated error ({agg_mode})")
@@ -520,6 +628,42 @@ def _plot_network(
     )
     output_scale = _load_output_scale(run_dir, network)
     is_exact, exact_runtime = _load_bab_status(run_dir, network)
+
+    # Load runtime data
+    estimator_runtimes = {}
+    for estimator in estimators:
+        estimator_runtimes[estimator] = _load_estimator_runtimes(
+            run_dir, estimator, network
+        )
+
+    bab_runtime_data = _load_bab_all_runtime_thresholds(run_dir, network, output_scale)
+
+    # Print runtime information to console
+    print(f"\n{'='*70}")
+    print(f"Network: {network}")
+    print(f"{'='*70}")
+
+    if not bab_runtime_data.empty:
+        print(f"\nBaB Runtime Progress:")
+        print(f"  Final runtime: {bab_runtime_data['runtime'].iloc[-1]:.2f}s")
+        print(f"  Final max half-width: {bab_runtime_data['max_half_width'].iloc[-1]:.6e}")
+        print(f"  Final max half-width (%): {bab_runtime_data['max_half_width_pct'].iloc[-1]:.4f}%")
+        print(f"  Total iterations: {len(bab_runtime_data)}")
+        if is_exact:
+            print(f"  Status: EXACT (runtime: {exact_runtime:.2f}s)")
+        else:
+            print(f"  Status: NOT EXACT")
+
+    if estimator_runtimes:
+        print(f"\nEstimator Total Runtimes:")
+        for estimator in sorted(estimator_runtimes.keys()):
+            runtimes = estimator_runtimes[estimator]
+            if runtimes:
+                print(f"  {estimator}:")
+                for num_samples in sorted(runtimes.keys()):
+                    total_time = runtimes[num_samples]
+                    print(f"    {num_samples:>10} samples: {total_time:>8.2f}s")
+
     runs_list = []
     for estimator in estimators:
         runs = _load_sampling_errors(
@@ -549,6 +693,9 @@ def _plot_network(
             highlight,
             summary,
             highlight_vals,
+            estimators,
+            estimator_runtimes,
+            bab_runtime_data,
         )
     max_error = float(summary["max_error"].max())
     ticks = _compute_output_ticks(output_scale, max_error)
@@ -560,7 +707,8 @@ def _plot_network(
     if exact_tick is not None:
         y_min = min(y_min, exact_tick)
     if not is_exact and last_bound_half_width > 0:
-        y_min = min(y_min, last_bound_half_width)
+        # Set y_min lower to show the full uncertainty bar
+        y_min = min(y_min, last_bound_half_width / 3.0)
     y_min = max(y_min, 1e-12)
     y_max = max(max_error, max(ticks))
     if exact_tick is not None:
@@ -602,7 +750,6 @@ def main(
     out_name: str,
     sampling_estimators: list[str] | None,
     all_networks: bool,
-    include_bab: bool,
     error_agg: str,
     highlight: str | None,
     y_axis_scale: str,
@@ -623,8 +770,9 @@ def main(
         estimators = sampling_estimators
     if not estimators:
         raise SystemExit(f"No sampling estimators found under {run_dir}")
+    # Always discover networks from estimators only (BaB still used for ground truth)
     networks = _collect_networks(
-        run_dir, estimators, network, all_networks, include_bab
+        run_dir, estimators, network, all_networks, include_bab=False
     )
     figures = []
     for net in networks:
@@ -663,8 +811,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--networks",
         type=str,
-        required=True,
-        help="Network name inside the run directory, or 'all'.",
+        default="all",
+        help="Network name inside the run directory, or 'all' (default: all).",
     )
     parser.add_argument(
         "--out-name",
@@ -676,18 +824,13 @@ if __name__ == "__main__":
         "--sampling-estimator",
         type=str,
         nargs="+",
-        default=["PermutationSHAP"],
-        help="Sampling estimators to plot, or include 'all' for every estimator.",
-    )
-    parser.add_argument(
-        "--estimators-only",
-        action="store_true",
-        help="Discover networks from estimators only (BaB still used for ground truth).",
+        default=["all"],
+        help="Sampling estimators to plot, or 'all' for every estimator (default: all).",
     )
     parser.add_argument(
         "--error-agg",
         type=str,
-        default="l2",
+        default="linf",
         choices=["l1", "l2", "linf"],
         help="Aggregation of per-feature errors for each run.",
     )
@@ -701,9 +844,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--y-axis",
         type=str,
-        default="lin",
+        default="log",
         choices=["lin", "log"],
-        help="Scale to use for the error axis (linear default, or log).",
+        help="Scale to use for the error axis (log default, or linear).",
     )
     parser.add_argument(
         "--area",
@@ -733,7 +876,6 @@ if __name__ == "__main__":
         args.out_name,
         args.sampling_estimator,
         all_networks,
-        not args.estimators_only,
         args.error_agg,
         args.highlight,
         args.y_axis,

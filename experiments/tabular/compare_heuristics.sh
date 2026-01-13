@@ -21,7 +21,7 @@ if [ -z ${TIMESTAMP+x} ];
 then
   TIMESTAMP="$(date -u +%Y-%m-%d_%H-%M-%S)"
 fi
-EXPERIMENT_DIR="$HERE/output/compare_to_exactshap/${SHAP_VARIANT}_${TIMESTAMP}"
+EXPERIMENT_DIR="$HERE/output/compare_heuristics/${SHAP_VARIANT}_${TIMESTAMP}"
 
 for network in "${NETWORKS[@]}"; do
   network_filename=$(basename "$network")
@@ -29,7 +29,7 @@ for network in "${NETWORKS[@]}"; do
 
   printf "\n\nRunning Warmup for Branch and Bound on ${network}...\n"
 
-  OUT_DIR="$HERE/output/compare_heuristics/${TIMESTAMP}/warmup/BaB/${network_name}"
+  OUT_DIR="${EXPERIMENT_DIR}/warmup/${network_name}"
   mkdir -p "$OUT_DIR"
   timeout "$WARMUP_TIMEOUT" \
     python -m experiments.tabular.bound \
@@ -46,7 +46,7 @@ for network in "${NETWORKS[@]}"; do
     "strong-branching-better" "strong-branching-worse" \
     "smart-branching-ibp-better" "smart-branching-ibp-worse"; do
     for i in {1..5}; do # repeat runtime measurements five times
-      OUT_DIR="$HERE/output/compare_heuristics/${TIMESTAMP}/split_strategies/${split_strategy}/${network_name}/repeatition_${i}"
+      OUT_DIR="${EXPERIMENT_DIR}/split_strategies/${split_strategy}/${network_name}/repeatition_${i}"
       mkdir -p "$OUT_DIR"
       timeout "$HARD_TIMEOUT" \
         python -m experiments.tabular.bound \
@@ -63,7 +63,7 @@ for network in "${NETWORKS[@]}"; do
 
   for select_strategy in "max-diam" "min-diam" "fifo" "lifo"; do
     for i in {1..5}; do # repeat runtime measurements five times
-      OUT_DIR="$HERE/output/compare_heuristics/${TIMESTAMP}/select_strategies/${select_strategy}/${network_name}/repeatition_${i}"
+      OUT_DIR="${EXPERIMENT_DIR}/select_strategies/${select_strategy}/${network_name}/repeatition_${i}"
       mkdir -p "$OUT_DIR"
       timeout "$HARD_TIMEOUT" \
         python -m experiments.tabular.bound \
@@ -80,7 +80,7 @@ for network in "${NETWORKS[@]}"; do
 
   for compute_bounds in "ibp" "crown_ibp" "crown" "alpha-crown"; do
     for i in {1..5}; do # repeat runtime measurements five times
-      OUT_DIR="$HERE/output/compare_heuristics/${TIMESTAMP}/compute_bounds/${compute_bounds}/${network_name}/repeatition_${i}"
+      OUT_DIR="${EXPERIMENT_DIR}/compute_bounds/${compute_bounds}/${network_name}/repeatition_${i}"
       mkdir -p "$OUT_DIR"
       timeout "$HARD_TIMEOUT" \
         python -m experiments.tabular.bound \
