@@ -1,8 +1,7 @@
 # Copyright 2025 David Boetius
-from __future__ import annotations
-
 import argparse
 from pathlib import Path
+from statistics import NormalDist
 
 import numpy as np
 import pandas as pd
@@ -129,7 +128,7 @@ def _load_bab_runtime_thresholds(
 def _compute_output_ticks(output_scale: float, max_error: float) -> list[float]:
     if output_scale <= 0:
         return []
-    ticks = [output_scale, output_scale * 0.1, output_scale * 0.01]
+    ticks = [output_scale * 0.1, output_scale * 0.01]
     tick = output_scale
     while tick < max_error:
         tick *= 10.0
@@ -208,11 +207,11 @@ def _compute_aggregated_error(
         )
     else:
         errors = np.abs(values - true_vals)
-    if agg_mode == "MAE":
+    if agg_mode == "l1":
         return pd.Series(errors.mean(axis=1), index=df.index)
-    if agg_mode == "MSE":
-        return pd.Series(np.square(errors).mean(axis=1), index=df.index)
-    if agg_mode == "max":
+    if agg_mode == "l2":
+        return pd.Series(np.sqrt(np.square(errors).mean(axis=1)), index=df.index)
+    if agg_mode == "linf":
         return pd.Series(errors.max(axis=1), index=df.index)
     raise ValueError(f"Unknown aggregation mode: {agg_mode}")
 
@@ -264,13 +263,55 @@ def _aggregate_errors(runs: pd.DataFrame) -> pd.DataFrame:
     summary = grouped["error"].agg(
         min_error="min",
         max_error="max",
+        mean_error="mean",
+        std_error="std",
         count="count",
     )
+    summary["std_error"] = summary["std_error"].fillna(0.0)
     return summary.sort_values(by=["estimator", "num_samples"])
+
+
+def _prepare_area_bounds(
+    summary: pd.DataFrame, area_mode: str, ci_multiplier: float | None
+) -> pd.DataFrame:
+    summary = summary.copy()
+    if area_mode == "none":
+        summary["area_lower"] = np.nan
+        summary["area_upper"] = np.nan
+    elif area_mode == "range" or ci_multiplier is None:
+        summary["area_lower"] = summary["min_error"]
+        summary["area_upper"] = summary["max_error"]
+    else:
+        std = summary["std_error"].fillna(0.0)
+        summary["area_lower"] = summary["mean_error"] - ci_multiplier * std
+        summary["area_upper"] = summary["mean_error"] + ci_multiplier * std
+    summary["area_lower"] = summary["area_lower"].clip(lower=0.0)
+    summary["area_upper"] = summary["area_upper"].clip(lower=0.0)
+    return summary
+
+
+def _parse_area_argument(area_value: str) -> tuple[str, float | None, float | None]:
+    value_lower = area_value.lower()
+    if value_lower == "range":
+        return "range", None, None
+    if value_lower == "none":
+        return "none", None, None
+    try:
+        alpha = float(area_value)
+    except ValueError as exc:
+        raise SystemExit(
+            "--area must be 'range', 'none', or a floating point value between 0 and 1."
+        ) from exc
+    if not 0.0 < alpha < 1.0:
+        raise SystemExit("--area floating point values must be in (0, 1).")
+    multiplier = NormalDist().inv_cdf(1.0 - alpha / 2.0)
+    return "ci", alpha, multiplier
 
 
 def _select_highlight_values(runs: pd.DataFrame, highlight: str | None) -> pd.DataFrame:
     if runs.empty:
+        return pd.DataFrame()
+    if highlight is None or highlight.lower() == "none":
         return pd.DataFrame()
     selected = []
     for estimator in sorted(runs["estimator"].unique()):
@@ -294,6 +335,64 @@ def _select_highlight_values(runs: pd.DataFrame, highlight: str | None) -> pd.Da
     return pd.concat(selected, ignore_index=True)
 
 
+def _sanitize_name_component(value: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in value)
+
+
+def _build_wide_summary(summary: pd.DataFrame) -> pd.DataFrame:
+    metrics = [
+        "min_error",
+        "max_error",
+        "mean_error",
+        "std_error",
+        "count",
+        "area_lower",
+        "area_upper",
+    ]
+    base = pd.DataFrame({"num_samples": sorted(summary["num_samples"].unique())})
+    for metric in metrics:
+        if metric not in summary.columns:
+            continue
+        pivot = summary.pivot(index="num_samples", columns="estimator", values=metric)
+        pivot = pivot.rename(columns=lambda est: f"{est}_{metric}")
+        pivot = pivot.reset_index()
+        base = base.merge(pivot, on="num_samples", how="left")
+    return base
+
+
+def _merge_highlight_columns(
+    data: pd.DataFrame, highlight_vals: pd.DataFrame
+) -> pd.DataFrame:
+    if highlight_vals.empty:
+        return data
+    pivot = highlight_vals.pivot(index="num_samples", columns="estimator", values="error")
+    pivot = pivot.rename(columns=lambda est: f"{est}_highlight_error")
+    pivot = pivot.reset_index()
+    return data.merge(pivot, on="num_samples", how="left")
+
+
+def _dump_network_data(
+    run_dir: Path,
+    network: str,
+    error_agg: str,
+    highlight: str | None,
+    summary: pd.DataFrame,
+    highlight_vals: pd.DataFrame,
+) -> None:
+    if summary.empty and highlight_vals.empty:
+        return
+    highlight_label = highlight if highlight else "none"
+    safe_network = _sanitize_name_component(network)
+    safe_agg = _sanitize_name_component(error_agg)
+    safe_highlight = _sanitize_name_component(highlight_label)
+    dump_name = f"{safe_network}_{safe_agg}_{safe_highlight}.csv"
+    dump_path = run_dir / dump_name
+    data = _build_wide_summary(summary)
+    data = _merge_highlight_columns(data, highlight_vals)
+    dump_path.parent.mkdir(parents=True, exist_ok=True)
+    data.to_csv(dump_path, index=False)
+
+
 def _plot_error_summary(
     ax: plt.Axes,
     error_summary: pd.DataFrame,
@@ -309,37 +408,44 @@ def _plot_error_summary(
     is_exact: bool,
     last_bound_half_width: float,
     y_axis_scale: str,
+    area_mode: str,
+    area_alpha: float | None,
     title: str | None = None,
 ) -> None:
     estimator_order = list(error_summary["estimator"].unique())
     estimator_colors = dict(
         zip(estimator_order, sns.color_palette(n_colors=len(estimator_order)))
     )
-    for estimator, group in error_summary.groupby("estimator"):
-        group = group.sort_values("num_samples")
-        ax.fill_between(
-            group["num_samples"],
-            group["min_error"],
-            group["max_error"],
-            color=estimator_colors.get(estimator),
-            alpha=0.4,
-            linewidth=1.4,
-            edgecolor=estimator_colors.get(estimator),
-            zorder=1,
-            label=f"{estimator} range",
+    if area_mode != "none":
+        area_label = (
+            "range" if area_mode == "range" or area_alpha is None else f"CI α={area_alpha:g}"
         )
-    for estimator, group in highlight_vals.groupby("estimator"):
-        group = group.sort_values("num_samples")
-        name = group["name"].iloc[0]
-        ax.plot(
-            group["num_samples"],
-            group["error"],
-            color=estimator_colors.get(estimator),
-            linewidth=2.0,
-            marker="o",
-            zorder=2,
-            label=f"{estimator} ({name})",
-        )
+        for estimator, group in error_summary.groupby("estimator"):
+            group = group.sort_values("num_samples")
+            ax.fill_between(
+                group["num_samples"],
+                group["area_lower"],
+                group["area_upper"],
+                color=estimator_colors.get(estimator),
+                alpha=0.4,
+                linewidth=1.4,
+                edgecolor=estimator_colors.get(estimator),
+                zorder=1,
+                label=f"{estimator} {area_label}",
+            )
+    if not highlight_vals.empty:
+        for estimator, group in highlight_vals.groupby("estimator"):
+            group = group.sort_values("num_samples")
+            name = group["name"].iloc[0]
+            ax.plot(
+                group["num_samples"],
+                group["error"],
+                color=estimator_colors.get(estimator),
+                linewidth=2.0,
+                marker="o",
+                zorder=2,
+                label=f"{estimator} ({name})",
+            )
     ax.set_xscale("log")
     ax.set_yscale("log" if y_axis_scale == "log" else "linear")
     if ticks:
@@ -404,6 +510,10 @@ def _plot_network(
     error_agg: str,
     highlight: str | None,
     y_axis_scale: str,
+    area_mode: str,
+    area_alpha: float | None,
+    ci_multiplier: float | None,
+    dump_data: bool,
 ) -> plt.Figure | None:
     bounds, true_values, last_bound_half_width = _load_bab_final_bounds(
         run_dir, network
@@ -429,7 +539,17 @@ def _plot_network(
         print(f"Skipping {network} because all errors are zero.")
         return None
     summary = _aggregate_errors(runs)
+    summary = _prepare_area_bounds(summary, area_mode, ci_multiplier)
     highlight_vals = _select_highlight_values(runs, highlight)
+    if dump_data:
+        _dump_network_data(
+            run_dir,
+            network,
+            error_agg,
+            highlight,
+            summary,
+            highlight_vals,
+        )
     max_error = float(summary["max_error"].max())
     ticks = _compute_output_ticks(output_scale, max_error)
     runtime_thresholds = _load_bab_runtime_thresholds(
@@ -468,6 +588,8 @@ def _plot_network(
         is_exact,
         last_bound_half_width,
         y_axis_scale,
+        area_mode,
+        area_alpha,
         title=f"Sampling error for {network}",
     )
     fig.tight_layout()
@@ -484,6 +606,10 @@ def main(
     error_agg: str,
     highlight: str | None,
     y_axis_scale: str,
+    area_mode: str,
+    area_alpha: float | None,
+    ci_multiplier: float | None,
+    dump_data: bool,
 ) -> None:
     if sampling_estimators is None or any(
         estimator.lower() == "all" for estimator in sampling_estimators
@@ -511,6 +637,10 @@ def main(
             error_agg,
             highlight,
             y_axis_scale,
+            area_mode,
+            area_alpha,
+            ci_multiplier,
+            dump_data,
         )
         if fig is not None:
             figures.append(fig)
@@ -557,8 +687,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--error-agg",
         type=str,
-        default="MSE",
-        choices=["MAE", "MSE", "max"],
+        default="l2",
+        choices=["l1", "l2", "linf"],
         help="Aggregation of per-feature errors for each run.",
     )
     parser.add_argument(
@@ -566,7 +696,7 @@ if __name__ == "__main__":
         type=str,
         default="mean",
         help="The line within the error range to highlight. "
-        "Either 'mean' or a specific seed to highlight.",
+        "Either 'mean', a specific seed, or 'none' to disable the line.",
     )
     parser.add_argument(
         "--y-axis",
@@ -575,10 +705,28 @@ if __name__ == "__main__":
         choices=["lin", "log"],
         help="Scale to use for the error axis (linear default, or log).",
     )
+    parser.add_argument(
+        "--area",
+        type=str,
+        default="range",
+        help=(
+            "Shaded confidence interval: 'range' for min/max, alpha in (0,1) for a "
+            "Gaussian mean±z·std interval, or 'none' to hide the shaded area."
+        ),
+    )
+    parser.add_argument(
+        "--dump-data",
+        action="store_true",
+        help=(
+            "Store per-network CSV files named <network>_<aggregation>_<highlight>.csv "
+            "containing the plotted data (highlight where available, otherwise summary)."
+        ),
+    )
     args = parser.parse_args()
     networks_arg = args.networks
     all_networks = networks_arg.lower() == "all"
     network = None if all_networks else networks_arg
+    area_mode, area_alpha, ci_multiplier = _parse_area_argument(args.area)
     main(
         args.run_dir,
         network,
@@ -589,4 +737,8 @@ if __name__ == "__main__":
         args.error_agg,
         args.highlight,
         args.y_axis,
+        area_mode,
+        area_alpha,
+        ci_multiplier,
+        args.dump_data,
     )
