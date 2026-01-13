@@ -11,16 +11,13 @@ NETWORKS=(
   "default-mlp-64x3.eqx"
   "automobile-mlp-32x2.eqx"
   "steel-mlp-8x2.eqx"
-  "breast_cancer-mlp-32x2.eqx"
-  "annealing-mlp-32x2.eqx"
-  "sonar-mlp-32x2.eqx"
 )
 
 if [ -z ${TIMESTAMP+x} ];
 then
   TIMESTAMP="$(date -u +%Y-%m-%d_%H-%M-%S)"
 fi
-EXPERIMENT_DIR="$HERE/output/compare_estimators/${SHAP_VARIANT}_${TIMESTAMP}"
+EXPERIMENT_DIR="$HERE/output/bab_vs_estimators/${SHAP_VARIANT}_${TIMESTAMP}"
 
 # Use the results from ./compare_to_exactshap.sh instead
 # for network in "${NETWORKS[@]}"; do
@@ -61,7 +58,7 @@ EXPERIMENT_DIR="$HERE/output/compare_estimators/${SHAP_VARIANT}_${TIMESTAMP}"
 for network in "${NETWORKS[@]}"; do
   network_filename=$(basename "$network")
   network_name="${network_filename%.*}"
-  for estimator in "KernelSHAP" "PermutationSHAP" "LeverageSHAP" "LinearMSR" "TreeMSR"; do
+  for estimator in "KernelSHAP" "LeverageSHAP" "LinearMSR" "TreeMSR"; do
     printf "================================================================================\n"
     printf "Running Warmup for ${estimator} on ${network}\n"
     printf "================================================================================\n"
@@ -82,7 +79,7 @@ for network in "${NETWORKS[@]}"; do
     printf "Running ${estimator} on ${network}\n"
     printf "================================================================================\n"
     
-    OUT_DIR="${EXPERIMENT_DIR}/${estimator}/${network_name}/seed_${seed}/${num_samples}"
+    OUT_DIR="${EXPERIMENT_DIR}/${estimator}/${network_name}/"
     mkdir -p "$OUT_DIR"
     python -m experiments.tabular.estimate \
       --model "experiments/resources/${network}" \
@@ -91,7 +88,7 @@ for network in "${NETWORKS[@]}"; do
       --estimator "${estimator}" \
       --timeout "$TIMEOUT" \
       --out "$OUT_DIR" \
-      --num-samples 201,286,407,580,828,1180,1682,2399,3420,4877,6955,9918,14143,20167,28759,41010,58481,83394,118921,169583,241828,344849,491760,701256,1000000 \
+      --num-samples 1000,10000,100000,1000000,10000000 \
       --seeds $(seq 0 99) \
       --silent
     
