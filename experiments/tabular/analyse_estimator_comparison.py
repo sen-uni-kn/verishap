@@ -33,12 +33,13 @@ def _load_bab_final_bounds(
         midpoint = (lb + ub) / 2.0
         half_width = (ub - lb) / 2.0
         max_half_width = max(max_half_width, abs(half_width))
+        true_value = midpoint if np.isclose(lb, ub, atol=1e-4, rtol=1e-4) else np.nan
         bounds[feature_key] = (lb, ub)
-        true_values[feature_key] = midpoint
+        true_values[feature_key] = true_value
         try:
             feature_idx = int(feature_key)
             bounds[feature_idx] = (lb, ub)
-            true_values[feature_idx] = midpoint
+            true_values[feature_idx] = true_value
         except (TypeError, ValueError):
             continue
     return bounds, true_values, max_half_width
@@ -50,8 +51,8 @@ def _load_output_scale(run_dir: Path, network: str) -> float:
         raise SystemExit(f"Missing BaB info.yaml at {info_path}")
     with info_path.open("r") as handle:
         info = yaml.safe_load(handle)
-    model_output = info.get("config", {}).get("further_stats", {}).get(
-        "model_output", None
+    model_output = (
+        info.get("config", {}).get("further_stats", {}).get("model_output", None)
     )
     if model_output is None:
         raise SystemExit(f"Missing model_output in {info_path}")
@@ -189,28 +190,28 @@ def _compute_aggregated_error(
     true_values: dict[object, float],
     bounds: dict[object, tuple[float, float]],
     agg_mode: str,
-    use_bounds: bool,
 ) -> pd.Series:
-    if use_bounds:
-        feature_cols = [col for col in df.columns if col in bounds]
-    else:
-        feature_cols = [col for col in df.columns if col in true_values]
+    feature_cols = [col for col in df.columns if col in bounds]
     if not feature_cols:
         raise SystemExit("No overlapping feature columns found for error aggregation.")
     values = df[feature_cols].to_numpy()
+    true_vals = np.array([true_values[col] for col in feature_cols])
+    use_bounds = np.isnan(true_vals).any()
     if use_bounds:
         lower = np.array([bounds[col][0] for col in feature_cols])
         upper = np.array([bounds[col][1] for col in feature_cols])
+        # Optimistic error calculation
         errors = np.where(
             values < lower,
             lower - values,
             np.where(values > upper, values - upper, 0.0),
         )
     else:
-        true_vals = np.array([true_values[col] for col in feature_cols])
         errors = np.abs(values - true_vals)
-    if agg_mode == "mean":
+    if agg_mode == "MAE":
         return pd.Series(errors.mean(axis=1), index=df.index)
+    if agg_mode == "MSE":
+        return pd.Series(np.square(errors).mean(axis=1), index=df.index)
     if agg_mode == "max":
         return pd.Series(errors.max(axis=1), index=df.index)
     raise ValueError(f"Unknown aggregation mode: {agg_mode}")
@@ -223,7 +224,6 @@ def _load_sampling_errors(
     true_values: dict[object, float],
     bounds: dict[object, tuple[float, float]],
     agg_mode: str,
-    use_bounds: bool,
 ) -> pd.DataFrame:
     records = []
     sampling_root = run_dir / estimator / network
@@ -231,7 +231,7 @@ def _load_sampling_errors(
         return pd.DataFrame()
     for stats_path in sampling_root.rglob("estimate_iter_stats.feather"):
         df = pd.read_feather(stats_path)
-        errors = _compute_aggregated_error(df, true_values, bounds, agg_mode, use_bounds)
+        errors = _compute_aggregated_error(df, true_values, bounds, agg_mode)
         if "iter_key_0" in df.columns and "iter_key_1" in df.columns:
             sub = df[["iter_key_0", "iter_key_1"]].copy()
             sub["error"] = errors
@@ -269,25 +269,35 @@ def _aggregate_errors(runs: pd.DataFrame) -> pd.DataFrame:
     return summary.sort_values(by=["estimator", "num_samples"])
 
 
-def _select_highlight_runs(
-    runs: pd.DataFrame, highlight_seed: str | None
-) -> pd.DataFrame:
+def _select_highlight_values(runs: pd.DataFrame, highlight: str | None) -> pd.DataFrame:
     if runs.empty:
         return pd.DataFrame()
     selected = []
     for estimator in sorted(runs["estimator"].unique()):
         estimator_runs = runs[runs["estimator"] == estimator]
-        seed = highlight_seed
-        if seed is None or seed not in set(estimator_runs["seed"]):
-            seed = sorted(estimator_runs["seed"].unique())[0]
-        selected.append(estimator_runs[estimator_runs["seed"] == seed])
+        if highlight == "mean":
+            mean_error = estimator_runs.groupby("num_samples", as_index=False)[
+                "error"
+            ].mean()
+            mean_error["estimator"] = estimator
+            mean_error["name"] = "mean"
+            selected.append(mean_error)
+        else:
+            seed = highlight
+            if seed not in estimator_runs["seed"].unique():
+                raise SystemExit(f"Seed {seed} not found for estimator {estimator}")
+            selected.append(
+                estimator_runs[estimator_runs["seed"] == seed].rename(
+                    columns={"seed": "name"}
+                )
+            )
     return pd.concat(selected, ignore_index=True)
 
 
 def _plot_error_summary(
     ax: plt.Axes,
     error_summary: pd.DataFrame,
-    highlight_runs: pd.DataFrame,
+    highlight_vals: pd.DataFrame,
     agg_mode: str,
     output_scale: float,
     runtime_thresholds: dict[float, float | None],
@@ -318,9 +328,9 @@ def _plot_error_summary(
             zorder=1,
             label=f"{estimator} range",
         )
-    for estimator, group in highlight_runs.groupby("estimator"):
+    for estimator, group in highlight_vals.groupby("estimator"):
         group = group.sort_values("num_samples")
-        seed = group["seed"].iloc[0]
+        name = group["name"].iloc[0]
         ax.plot(
             group["num_samples"],
             group["error"],
@@ -328,7 +338,7 @@ def _plot_error_summary(
             linewidth=2.0,
             marker="o",
             zorder=2,
-            label=f"{estimator} (seed {seed})",
+            label=f"{estimator} ({name})",
         )
     ax.set_xscale("log")
     ax.set_yscale("log" if y_axis_scale == "log" else "linear")
@@ -338,7 +348,8 @@ def _plot_error_summary(
             ticks_sorted.append(exact_tick)
         ticks_sorted = sorted(set(ticks_sorted))
         ax.set_yticks(ticks_sorted)
-        ax.set_ylim(y_min, y_max)
+        if not np.isnan(y_min) and not np.isnan(y_max):
+            ax.set_ylim(y_min, y_max)
         labels = []
         for tick_value in ticks_sorted:
             if exact_tick is not None and tick_value == exact_tick:
@@ -349,7 +360,8 @@ def _plot_error_summary(
         ax.set_yticklabels(labels)
         ax_right = ax.twinx()
         ax_right.set_yscale("log" if y_axis_scale == "log" else "linear")
-        ax_right.set_ylim(y_min, y_max)
+        if not np.isnan(y_min) and not np.isnan(y_max):
+            ax_right.set_ylim(y_min, y_max)
         ax_right.set_yticks(ticks_sorted)
         runtime_labels = []
         for tick_value in ticks_sorted:
@@ -390,7 +402,7 @@ def _plot_network(
     estimators: list[str],
     multi_networks: bool,
     error_agg: str,
-    highlight_seed: str | None,
+    highlight: str | None,
     y_axis_scale: str,
 ) -> plt.Figure | None:
     bounds, true_values, last_bound_half_width = _load_bab_final_bounds(
@@ -398,7 +410,6 @@ def _plot_network(
     )
     output_scale = _load_output_scale(run_dir, network)
     is_exact, exact_runtime = _load_bab_status(run_dir, network)
-    use_bounds = not is_exact
     runs_list = []
     for estimator in estimators:
         runs = _load_sampling_errors(
@@ -408,15 +419,17 @@ def _plot_network(
             true_values,
             bounds,
             error_agg,
-            use_bounds,
         )
         if not runs.empty:
             runs_list.append(runs)
     if not runs_list:
         return None
     runs = pd.concat(runs_list, ignore_index=True)
+    if np.isclose(runs["error"], 0.0).all():
+        print(f"Skipping {network} because all errors are zero.")
+        return None
     summary = _aggregate_errors(runs)
-    highlight_runs = _select_highlight_runs(runs, highlight_seed)
+    highlight_vals = _select_highlight_values(runs, highlight)
     max_error = float(summary["max_error"].max())
     ticks = _compute_output_ticks(output_scale, max_error)
     runtime_thresholds = _load_bab_runtime_thresholds(
@@ -443,7 +456,7 @@ def _plot_network(
     _plot_error_summary(
         ax,
         summary,
-        highlight_runs,
+        highlight_vals,
         error_agg,
         output_scale,
         runtime_thresholds,
@@ -455,32 +468,10 @@ def _plot_network(
         is_exact,
         last_bound_half_width,
         y_axis_scale,
-        title=f"Sampling error vs. BaB midpoint for {network}",
+        title=f"Sampling error for {network}",
     )
     fig.tight_layout()
     return fig
-
-
-def _plot_network_all_features(
-    run_dir: Path,
-    network: str,
-    out_name: str,
-    estimators: list[str],
-    multi_networks: bool,
-    error_agg: str,
-    highlight_seed: str | None,
-    y_axis_scale: str,
-) -> plt.Figure | None:
-    return _plot_network(
-        run_dir,
-        network,
-        out_name,
-        estimators,
-        multi_networks,
-        error_agg,
-        highlight_seed,
-        y_axis_scale,
-    )
 
 
 def main(
@@ -491,12 +482,11 @@ def main(
     all_networks: bool,
     include_bab: bool,
     error_agg: str,
-    highlight_seed: str | None,
+    highlight: str | None,
     y_axis_scale: str,
 ) -> None:
-    if (
-        sampling_estimators is None
-        or any(estimator.lower() == "all" for estimator in sampling_estimators)
+    if sampling_estimators is None or any(
+        estimator.lower() == "all" for estimator in sampling_estimators
     ):
         estimators = sorted(
             path.name
@@ -507,17 +497,19 @@ def main(
         estimators = sampling_estimators
     if not estimators:
         raise SystemExit(f"No sampling estimators found under {run_dir}")
-    networks = _collect_networks(run_dir, estimators, network, all_networks, include_bab)
+    networks = _collect_networks(
+        run_dir, estimators, network, all_networks, include_bab
+    )
     figures = []
     for net in networks:
-        fig = _plot_network_all_features(
+        fig = _plot_network(
             run_dir,
             net,
             out_name,
             estimators,
             all_networks,
             error_agg,
-            highlight_seed,
+            highlight,
             y_axis_scale,
         )
         if fig is not None:
@@ -560,20 +552,21 @@ if __name__ == "__main__":
     parser.add_argument(
         "--estimators-only",
         action="store_true",
-        help="Discover networks from estimators only (BaB still used for truth).",
+        help="Discover networks from estimators only (BaB still used for ground truth).",
     )
     parser.add_argument(
         "--error-agg",
         type=str,
-        default="mean",
-        choices=["mean", "max"],
+        default="MSE",
+        choices=["MAE", "MSE", "max"],
         help="Aggregation of per-feature errors for each run.",
     )
     parser.add_argument(
-        "--highlight-seed",
+        "--highlight",
         type=str,
-        default=None,
-        help="Seed to highlight for each estimator (falls back to first if missing).",
+        default="mean",
+        help="The line within the error range to highlight. "
+        "Either 'mean' or a specific seed to highlight.",
     )
     parser.add_argument(
         "--y-axis",
@@ -594,6 +587,6 @@ if __name__ == "__main__":
         all_networks,
         not args.estimators_only,
         args.error_agg,
-        args.highlight_seed,
+        args.highlight,
         args.y_axis,
     )

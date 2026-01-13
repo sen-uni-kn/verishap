@@ -22,7 +22,7 @@ then
 fi
 EXPERIMENT_DIR="$HERE/output/bab_vs_sampling/${SHAP_VARIANT}_${TIMESTAMP}"
 
-# Just use the results from ./compare_to_exactshap.sh
+# Use the results from ./compare_to_exactshap.sh instead
 # for network in "${NETWORKS[@]}"; do
 #   network_filename=$(basename "$network")
 #   network_name="${network_filename%.*}"
@@ -91,7 +91,7 @@ for network in "${NETWORKS[@]}"; do
       --estimator "${estimator}" \
       --timeout "$TIMEOUT" \
       --out "$OUT_DIR" \
-      --num-samples 200,236,278,327,384,452,532,626,737,868,1021,1415,1665,1960,2307,2715,3195,4427,5210,6133,7218,8496,10000 \
+      --num-samples 201,286,407,580,828,1180,1682,2399,3420,4877,6955,9918,14143,20167,28759,41010,58481,83394,118921,169583,241828,344849,491760,701256,1000000 \
       --seeds $(seq 0 99) \
       --silent
     
