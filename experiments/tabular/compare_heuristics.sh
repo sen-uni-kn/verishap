@@ -33,7 +33,7 @@ for network in "${NETWORKS[@]}"; do
   mkdir -p "$OUT_DIR"
   timeout "$WARMUP_TIMEOUT" \
     python -m experiments.tabular.bound \
-      --model "experiments/tabular/resources/${network}" \
+      --model "experiments/resources/${network}" \
       --input 0 --output-feature 0 \
       --shap-variant "marginal" \
       --bound-method "bab" \
@@ -50,13 +50,13 @@ for network in "${NETWORKS[@]}"; do
       mkdir -p "$OUT_DIR"
       timeout "$HARD_TIMEOUT" \
         python -m experiments.tabular.bound \
-          --model "experiments/tabular/resources/${network}" \
+          --model "experiments/resources/${network}" \
           --input 0 --output-feature 0 \
           --shap-variant "${SHAP_VARIANT}" \
           --bound-method "bab" \
           --bound-options "batch_size=$BATCH_SIZE,split_strategy=$split_strategy" \
           --out "$OUT_DIR" \
-          --timeout "$TIMEOUT"
+          --timeout "$TIMEOUT" \
           --silent
     done
   done
@@ -67,13 +67,13 @@ for network in "${NETWORKS[@]}"; do
       mkdir -p "$OUT_DIR"
       timeout "$HARD_TIMEOUT" \
         python -m experiments.tabular.bound \
-          --model "experiments/tabular/resources/${network}" \
+          --model "experiments/resources/${network}" \
           --input 0 --output-feature 0 \
           --shap-variant "${SHAP_VARIANT}" \
           --bound-method "bab" \
           --bound-options "batch_size=$BATCH_SIZE,select_strategy=$select_strategy" \
           --out "$OUT_DIR" \
-          --timeout "$TIMEOUT"
+          --timeout "$TIMEOUT" \
           --silent
     done
   done
@@ -84,13 +84,13 @@ for network in "${NETWORKS[@]}"; do
       mkdir -p "$OUT_DIR"
       timeout "$HARD_TIMEOUT" \
         python -m experiments.tabular.bound \
-          --model "experiments/tabular/resources/${network}" \
+          --model "experiments/resources/${network}" \
           --input 0 --output-feature 0 \
           --shap-variant "zero-baseline" \
           --bound-method "bab" \
           --bound-options "batch_size=$BATCH_SIZE,compute_bounds=$compute_bounds" \
           --out "$OUT_DIR" \
-          --timeout "$TIMEOUT"
+          --timeout "$TIMEOUT" \
           --silent
     done
   done
