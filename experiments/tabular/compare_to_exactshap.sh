@@ -64,18 +64,21 @@ for network in "${NETWORKS[@]}"; do
   sleep 15s
   printf "\n\nRunning Branch and Bound on ${network}...\n"
 
-  OUT_DIR="${EXPERIMENT_DIR}/BaB/${network_name}"
-  mkdir -p "$OUT_DIR"
-  python -m experiments.tabular.bound \
-    --model "experiments/resources/${network}" \
-    --input 0 --output-feature 0 \
-    --shap-variant "${SHAP_VARIANT}" \
-    --bound-method "bab" \
-    --bound-options "batch_size=$BATCH_SIZE" \
-    --out "$OUT_DIR" \
-    --timeout "$TIMEOUT" \
-    --silent
-  sleep 15s
+
+  for i in {1..5}; do # repeat runtime measurements five times
+    OUT_DIR="${EXPERIMENT_DIR}/BaB/${network_name}/repeatition_${i}"
+    mkdir -p "$OUT_DIR"
+    python -m experiments.tabular.bound \
+      --model "experiments/resources/${network}" \
+      --input 0 --output-feature 0 \
+      --shap-variant "${SHAP_VARIANT}" \
+      --bound-method "bab" \
+      --bound-options "batch_size=$BATCH_SIZE" \
+      --out "$OUT_DIR" \
+      --timeout "$TIMEOUT" \
+      --silent
+    sleep 15s
+  done
 done
 
 # For the other networks, ExactSHAP ungracefully runs out of memory.
@@ -103,21 +106,26 @@ for network in "${EXACTSHAP_NETWORKS[@]}"; do
   sleep 15s
   printf "\n\nRunning ExactSHAP on ${network}...\n"
 
-  OUT_DIR="${EXPERIMENT_DIR}/ExactSHAP/${network_name}"
-  mkdir -p "$OUT_DIR"
-  timeout "$TIMEOUT" \
-    python -m experiments.tabular.exact_shap \
-      --model "experiments/resources/${network}" \
-      --input 0 --output-feature 0 \
-      --shap-variant "${SHAP_VARIANT}" \
-      --out "$OUT_DIR" \
-      --silent
-  
-  retVal=$?
-  if [ $retVal -eq 124 ]; then  # timeout returns 124 if the timeout is reached
+  for i in {1..5}; do
+    OUT_DIR="${EXPERIMENT_DIR}/ExactSHAP/${network_name}/repeatition_${i}"
+    mkdir -p "$OUT_DIR"
+    timeout "$TIMEOUT" \
+      python -m experiments.tabular.exact_shap \
+        --model "experiments/resources/${network}" \
+        --input 0 --output-feature 0 \
+        --shap-variant "${SHAP_VARIANT}" \
+        --out "$OUT_DIR" \
+        --silent
+    
+    retVal=$?
+    if [ $retVal -eq 124 ]; then  # timeout returns 124 if the timeout is reached
+      break
+    fi
+    sleep 15s
+  done
+  if [ $retVal -eq 124 ]; then
     break
   fi
-  sleep 15s
 done
 
 printf "Experiment complete.\n"

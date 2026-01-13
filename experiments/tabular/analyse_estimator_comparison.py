@@ -9,6 +9,7 @@ import pandas as pd
 import seaborn as sns
 import yaml
 from matplotlib import pyplot as plt
+from statistics import NormalDist
 
 
 def _load_bab_final_bounds(
@@ -129,7 +130,7 @@ def _load_bab_runtime_thresholds(
 def _compute_output_ticks(output_scale: float, max_error: float) -> list[float]:
     if output_scale <= 0:
         return []
-    ticks = [output_scale, output_scale * 0.1, output_scale * 0.01]
+    ticks = [output_scale * 0.1, output_scale * 0.01]
     tick = output_scale
     while tick < max_error:
         tick *= 10.0
@@ -208,11 +209,12 @@ def _compute_aggregated_error(
         )
     else:
         errors = np.abs(values - true_vals)
-    if agg_mode == "MAE":
+    print(df)
+    if agg_mode == "l1":
         return pd.Series(errors.mean(axis=1), index=df.index)
-    if agg_mode == "MSE":
-        return pd.Series(np.square(errors).mean(axis=1), index=df.index)
-    if agg_mode == "max":
+    if agg_mode == "l2":
+        return pd.Series(np.sqrt(np.square(errors).mean(axis=1)), index=df.index)
+    if agg_mode == "linf":
         return pd.Series(errors.max(axis=1), index=df.index)
     raise ValueError(f"Unknown aggregation mode: {agg_mode}")
 
@@ -264,9 +266,43 @@ def _aggregate_errors(runs: pd.DataFrame) -> pd.DataFrame:
     summary = grouped["error"].agg(
         min_error="min",
         max_error="max",
+        mean_error="mean",
+        std_error="std",
         count="count",
     )
+    summary["std_error"] = summary["std_error"].fillna(0.0)
     return summary.sort_values(by=["estimator", "num_samples"])
+
+
+def _prepare_area_bounds(
+    summary: pd.DataFrame, area_mode: str, ci_multiplier: float | None
+) -> pd.DataFrame:
+    summary = summary.copy()
+    if area_mode == "range" or ci_multiplier is None:
+        summary["area_lower"] = summary["min_error"]
+        summary["area_upper"] = summary["max_error"]
+    else:
+        std = summary["std_error"].fillna(0.0)
+        summary["area_lower"] = summary["mean_error"] - ci_multiplier * std
+        summary["area_upper"] = summary["mean_error"] + ci_multiplier * std
+    summary["area_lower"] = summary["area_lower"].clip(lower=0.0)
+    summary["area_upper"] = summary["area_upper"].clip(lower=0.0)
+    return summary
+
+
+def _parse_area_argument(area_value: str) -> tuple[str, float | None, float | None]:
+    if area_value.lower() == "range":
+        return "range", None, None
+    try:
+        alpha = float(area_value)
+    except ValueError as exc:
+        raise SystemExit(
+            "--area must be 'range' or a floating point value between 0 and 1."
+        ) from exc
+    if not 0.0 < alpha < 1.0:
+        raise SystemExit("--area floating point values must be in (0, 1).")
+    multiplier = NormalDist().inv_cdf(1.0 - alpha / 2.0)
+    return "ci", alpha, multiplier
 
 
 def _select_highlight_values(runs: pd.DataFrame, highlight: str | None) -> pd.DataFrame:
@@ -309,24 +345,27 @@ def _plot_error_summary(
     is_exact: bool,
     last_bound_half_width: float,
     y_axis_scale: str,
+    area_mode: str,
+    area_alpha: float | None,
     title: str | None = None,
 ) -> None:
     estimator_order = list(error_summary["estimator"].unique())
     estimator_colors = dict(
         zip(estimator_order, sns.color_palette(n_colors=len(estimator_order)))
     )
+    area_label = "range" if area_mode == "range" or area_alpha is None else f"CI α={area_alpha:g}"
     for estimator, group in error_summary.groupby("estimator"):
         group = group.sort_values("num_samples")
         ax.fill_between(
             group["num_samples"],
-            group["min_error"],
-            group["max_error"],
+            group["area_lower"],
+            group["area_upper"],
             color=estimator_colors.get(estimator),
             alpha=0.4,
             linewidth=1.4,
             edgecolor=estimator_colors.get(estimator),
             zorder=1,
-            label=f"{estimator} range",
+            label=f"{estimator} {area_label}",
         )
     for estimator, group in highlight_vals.groupby("estimator"):
         group = group.sort_values("num_samples")
@@ -404,6 +443,9 @@ def _plot_network(
     error_agg: str,
     highlight: str | None,
     y_axis_scale: str,
+    area_mode: str,
+    area_alpha: float | None,
+    ci_multiplier: float | None,
 ) -> plt.Figure | None:
     bounds, true_values, last_bound_half_width = _load_bab_final_bounds(
         run_dir, network
@@ -429,6 +471,7 @@ def _plot_network(
         print(f"Skipping {network} because all errors are zero.")
         return None
     summary = _aggregate_errors(runs)
+    summary = _prepare_area_bounds(summary, area_mode, ci_multiplier)
     highlight_vals = _select_highlight_values(runs, highlight)
     max_error = float(summary["max_error"].max())
     ticks = _compute_output_ticks(output_scale, max_error)
@@ -468,6 +511,8 @@ def _plot_network(
         is_exact,
         last_bound_half_width,
         y_axis_scale,
+        area_mode,
+        area_alpha,
         title=f"Sampling error for {network}",
     )
     fig.tight_layout()
@@ -484,6 +529,9 @@ def main(
     error_agg: str,
     highlight: str | None,
     y_axis_scale: str,
+    area_mode: str,
+    area_alpha: float | None,
+    ci_multiplier: float | None,
 ) -> None:
     if sampling_estimators is None or any(
         estimator.lower() == "all" for estimator in sampling_estimators
@@ -511,6 +559,9 @@ def main(
             error_agg,
             highlight,
             y_axis_scale,
+            area_mode,
+            area_alpha,
+            ci_multiplier,
         )
         if fig is not None:
             figures.append(fig)
@@ -557,8 +608,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--error-agg",
         type=str,
-        default="MSE",
-        choices=["MAE", "MSE", "max"],
+        default="l2",
+        choices=["l1", "l2", "linf"],
         help="Aggregation of per-feature errors for each run.",
     )
     parser.add_argument(
@@ -575,10 +626,20 @@ if __name__ == "__main__":
         choices=["lin", "log"],
         help="Scale to use for the error axis (linear default, or log).",
     )
+    parser.add_argument(
+        "--area",
+        type=str,
+        default="range",
+        help=(
+            "Shaded confidence interval: 'range' for min/max or alpha in (0,1) for a "
+            "Gaussian mean±z·std interval."
+        ),
+    )
     args = parser.parse_args()
     networks_arg = args.networks
     all_networks = networks_arg.lower() == "all"
     network = None if all_networks else networks_arg
+    area_mode, area_alpha, ci_multiplier = _parse_area_argument(args.area)
     main(
         args.run_dir,
         network,
@@ -589,4 +650,7 @@ if __name__ == "__main__":
         args.error_agg,
         args.highlight,
         args.y_axis,
+        area_mode,
+        area_alpha,
+        ci_multiplier,
     )
