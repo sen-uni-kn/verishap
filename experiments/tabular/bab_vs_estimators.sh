@@ -88,7 +88,7 @@ for network in "${NETWORKS[@]}"; do
       --estimator "${estimator}" \
       --timeout "$TIMEOUT" \
       --out "$OUT_DIR" \
-      --num-samples 1000,10000,100000,1000000,10000000 \
+      --num-samples 1000,2782,7742,21544,59948,166810,464158,1291549,3593813,10000000 \
       --seeds $(seq 0 99) \
       --silent
     
