@@ -55,7 +55,7 @@ if __name__ == "__main__":
             for n in num_samples:
                 for seed in seeds:
                     with timer["estimate"] as timer_context:
-                        estims = estimator(num_samples=n)
+                        estims = estimator(num_samples=n, seed=seed)
                     runtime = timer_context.runtime
 
                     if args.timeout is not None and runtime > args.timeout:
