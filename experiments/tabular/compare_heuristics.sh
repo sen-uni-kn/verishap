@@ -56,7 +56,7 @@ for network in "${NETWORKS[@]}"; do
           --bound-method "bab" \
           --bound-options "batch_size=$BATCH_SIZE,split_strategy=$split_strategy" \
           --out "$OUT_DIR" \
-          --timeout "$TIMEOUT"
+          --timeout "$TIMEOUT" \
           --silent
     done
   done
@@ -73,7 +73,7 @@ for network in "${NETWORKS[@]}"; do
           --bound-method "bab" \
           --bound-options "batch_size=$BATCH_SIZE,select_strategy=$select_strategy" \
           --out "$OUT_DIR" \
-          --timeout "$TIMEOUT"
+          --timeout "$TIMEOUT" \
           --silent
     done
   done
@@ -90,7 +90,7 @@ for network in "${NETWORKS[@]}"; do
           --bound-method "bab" \
           --bound-options "batch_size=$BATCH_SIZE,compute_bounds=$compute_bounds" \
           --out "$OUT_DIR" \
-          --timeout "$TIMEOUT"
+          --timeout "$TIMEOUT" \
           --silent
     done
   done
