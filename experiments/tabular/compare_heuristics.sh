@@ -33,7 +33,7 @@ for network in "${NETWORKS[@]}"; do
   mkdir -p "$OUT_DIR"
   timeout "$WARMUP_TIMEOUT" \
     python -m experiments.tabular.bound \
-      --model "experiments/tabular/resources/${network}" \
+      --model "experiments/resources/${network}" \
       --input 0 --output-feature 0 \
       --shap-variant "marginal" \
       --bound-method "bab" \
@@ -50,7 +50,7 @@ for network in "${NETWORKS[@]}"; do
       mkdir -p "$OUT_DIR"
       timeout "$HARD_TIMEOUT" \
         python -m experiments.tabular.bound \
-          --model "experiments/tabular/resources/${network}" \
+          --model "experiments/resources/${network}" \
           --input 0 --output-feature 0 \
           --shap-variant "${SHAP_VARIANT}" \
           --bound-method "bab" \
@@ -67,7 +67,7 @@ for network in "${NETWORKS[@]}"; do
       mkdir -p "$OUT_DIR"
       timeout "$HARD_TIMEOUT" \
         python -m experiments.tabular.bound \
-          --model "experiments/tabular/resources/${network}" \
+          --model "experiments/resources/${network}" \
           --input 0 --output-feature 0 \
           --shap-variant "${SHAP_VARIANT}" \
           --bound-method "bab" \
@@ -84,7 +84,7 @@ for network in "${NETWORKS[@]}"; do
       mkdir -p "$OUT_DIR"
       timeout "$HARD_TIMEOUT" \
         python -m experiments.tabular.bound \
-          --model "experiments/tabular/resources/${network}" \
+          --model "experiments/resources/${network}" \
           --input 0 --output-feature 0 \
           --shap-variant "zero-baseline" \
           --bound-method "bab" \
