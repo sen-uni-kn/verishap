@@ -36,17 +36,17 @@ class BranchStack[D: PyTree]:
         self.pytree = pytree
 
         for data in root_data:
-            if data.ndim == 0 or data.shape[0] != 1:
+            if data.ndim == 0:
                 raise ValueError(
-                    "Each array in the root entry must have a leading batch "
-                    f"axis of size 1. Got shape {data.shape}."
+                    "Each array in the root entry must have a leading batch axis. "
+                    f"Got shape {data.shape}."
                 )
 
         self.leaf_shapes = tuple(data.shape[1:] for data in root_data)
         self.batch_size = batch_size
 
         self.__stack = [root_data]
-        self.__size = 1
+        self.__size = root_data[0].shape[0]
 
     def __len__(self) -> int:
         assert self.__size >= 0

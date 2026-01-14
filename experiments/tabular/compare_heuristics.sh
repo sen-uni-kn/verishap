@@ -9,12 +9,12 @@ WARMUP_TIMEOUT=300  # 5min for downloading data and JAX compilation
 BATCH_SIZE=4096
 # Sorted by input dimension
 NETWORKS=(
-  "adult-mlp-32x2.eqx"
-  "obesity-mlp-32x2.eqx"
   "german-mlp-8x1.eqx"
   "mushroom-mlp-8x1.eqx"
   "default-mlp-64x3.eqx"
   "automobile-mlp-32x2.eqx"
+  "steel-mlp-8x2.eqx"
+  "sonar-mlp-32x2.eqx"
 )
 
 if [ -z ${TIMESTAMP+x} ];
@@ -35,7 +35,7 @@ for network in "${NETWORKS[@]}"; do
     python -m experiments.tabular.bound \
       --model "experiments/resources/${network}" \
       --input 0 --output-feature 0 \
-      --shap-variant "marginal" \
+      --shap-variant "${SHAP_VARIANT}" \
       --bound-method "bab" \
       --bound-options "batch_size=$BATCH_SIZE" \
       --out "$OUT_DIR" \
@@ -86,7 +86,7 @@ for network in "${NETWORKS[@]}"; do
         python -m experiments.tabular.bound \
           --model "experiments/resources/${network}" \
           --input 0 --output-feature 0 \
-          --shap-variant "zero-baseline" \
+          --shap-variant "${SHAP_VARIANT}" \
           --bound-method "bab" \
           --bound-options "batch_size=$BATCH_SIZE,compute_bounds=$compute_bounds" \
           --out "$OUT_DIR" \

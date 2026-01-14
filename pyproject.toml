@@ -18,7 +18,6 @@ dependencies = [
 
 [project.optional-dependencies]
 experiments = [
-    "leverageshap @ file:///${PROJECT_ROOT}/dependencies/leverageshap",
     "equinox==0.13.0",
     "optax==0.2.6",
     "shap==0.50.0",

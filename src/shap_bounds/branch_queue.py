@@ -1,10 +1,9 @@
 #  Copyright (c) 2025. David Boetius.
 #  Licensed under the MIT license.
-from collections.abc import Sequence
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, PyTree, Real
+from jaxtyping import Array, PyTree
 
 __all__ = [
     "BranchQueue",
@@ -37,23 +36,19 @@ class BranchQueue[D: PyTree]:
         self.pytree = pytree
 
         for data in root_data:
-            if data.ndim == 0 or data.shape[0] != 1:
+            if data.ndim == 0:
                 raise ValueError(
-                    "Each array in the root entry must have a leading batch "
-                    f"axis of size 1. Got shape {data.shape}."
+                    "Each array in the root entry must have a leading batch axis. "
+                    f"Got shape {data.shape}."
                 )
 
         self.leaf_shapes = tuple(data.shape[1:] for data in root_data)
         self.batch_size = batch_size
 
         self.__queue = []
-        if batch_size > 1:
-            # Holds inserted data until the data makes up a full batch.
-            self.__buffer = root_data
-        else:
-            self.__queue.append(root_data)
-            self.__buffer = self._empty_node()
-        self.__size = 1
+        self.__buffer = self._empty_node()
+        self.__size = 0
+        self.insert(root_entry)
 
     def __len__(self) -> int:
         assert self.__size >= 0

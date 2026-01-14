@@ -257,16 +257,12 @@ def _compute_aggregated_error(
     if use_bounds:
         lower = np.array([bounds[col][0] for col in feature_cols])
         upper = np.array([bounds[col][1] for col in feature_cols])
-        # Per-feature half-widths
-        half_widths = (upper - lower) / 2.0
         # Distance to bounds (optimistic error)
         errors = np.where(
             values < lower,
             lower - values,
             np.where(values > upper, values - upper, 0.0),
         )
-        # Add per-feature half-width to account for BaB uncertainty
-        errors = errors + half_widths
     else:
         errors = np.abs(values - true_vals)
     if agg_mode == "l1":

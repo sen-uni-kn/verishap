@@ -112,8 +112,8 @@ class PriorityBranchStore[D: PyTree]:
         for data in root_data:
             if data.ndim == 0:
                 raise ValueError(
-                    "Each array in the root entry must have a leading batch axis."
-                    f" Got shape {data.shape}."
+                    "Each array in the root entry must have a leading batch axis. "
+                    f"Got shape {data.shape}."
                 )
 
         self.leaf_shapes = tuple(data.shape[1:] for data in root_data)
