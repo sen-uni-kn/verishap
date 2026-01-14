@@ -15,7 +15,7 @@ from optax.losses import softmax_cross_entropy_with_integer_labels as cross_entr
 from sklearn.model_selection import train_test_split
 
 from ..models import MLP
-from .utils import load_dataset
+from ..tabular.utils import load_dataset
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -34,6 +34,12 @@ if __name__ == "__main__":
         help="Whether the dataset is a binary classification task. "
         "Otherwise, multi-class classification is assumed.",
     )
+    parser.add_argument(
+        "--multi-classification",
+        action="store_true",
+        help="Whether the dataset is a multi-class classification task. "
+        "Assumed by default.",
+    )
     parser.add_argument("--hidden-dim", type=int, default=32)
     parser.add_argument("--hidden-layers", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=64)
@@ -47,7 +53,10 @@ if __name__ == "__main__":
     dataset = args.dataset
     is_regression = args.regression
     is_binary_class = args.binary_classification
-    is_classification = not is_regression and not is_binary_class
+    is_classification_specified = args.multi_classification
+    is_classification = (
+        not is_regression and not is_binary_class
+    ) or is_classification_specified
     hidden_dim = args.hidden_dim
     hidden_layers = args.hidden_layers
     batch_size = args.batch_size
@@ -68,7 +77,7 @@ if __name__ == "__main__":
     print(f"Obtaining {dataset} dataset...")
     data, targets = load_dataset(dataset)
 
-    if is_classification:
+    if is_classification and not is_classification_specified:
         if targets.dtype == np.bool_:
             is_binary_class = True
             is_classification = False
@@ -82,9 +91,8 @@ if __name__ == "__main__":
 
     input_dim = data.shape[-1]
     if is_classification:
-        assert targets.dtype in (np.int32, np.int64, np.bool_), (
-            "Unsupported target dtype for classification: " + str(targets.dtype)
-        )
+        if targets.dtype not in (np.int32, np.int64, np.bool_):
+            targets = targets.argmax(axis=-1)
         targets = targets.astype(np.int32)
         output_dim = len(np.unique(targets))
     elif is_binary_class:
@@ -125,7 +133,7 @@ if __name__ == "__main__":
 
         num_class1 = (train_targets == 0).sum()
         num_class2 = (train_targets == 1).sum()
-        print(f"Class balance after rebalancing: {num_class1/num_class2:.2f}%")
+        print(f"Class balance after rebalancing: {num_class1 / num_class2:.2f}%")
 
     @dataclass
     class Dataset:
