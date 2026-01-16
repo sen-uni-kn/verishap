@@ -2,7 +2,7 @@
 import argparse
 from collections import defaultdict
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 import numpy as np
 import pandas as pd
@@ -14,6 +14,49 @@ def _get_runtime_at(condition: np.ndarray, iter_times: np.ndarray) -> float | No
     if len(idx) == 0:
         return None
     return iter_times[idx[0]]
+
+
+def _extract_dataset_name(info_path: Path) -> str:
+    parent = info_path.parent
+    if parent.name.startswith("repeatition_"):
+        parent = parent.parent
+    dataset, *_ = parent.name.split("-")
+    return dataset
+
+
+def _aggregate_value(values: Sequence[Any]) -> Any:
+    present_values = [value for value in values if value is not None]
+    if not present_values:
+        return None
+    first = present_values[0]
+
+    if isinstance(first, (bool, np.bool_)):
+        return any(present_values)
+
+    if isinstance(first, (int, np.integer)) and not isinstance(first, bool):
+        return int(np.median(present_values))
+
+    if isinstance(first, (float, np.floating, int, np.integer)):
+        return float(np.median(present_values))
+
+    return first
+
+
+def _aggregate_runs_by_dataset(runs: Iterable[dict]) -> dict[str, dict[str, Any]]:
+    grouped: dict[str, dict[str, list[Any]]] = defaultdict(lambda: defaultdict(list))
+    for run in runs:
+        dataset = run["dataset"]
+        for key, value in run.items():
+            if key == "dataset":
+                continue
+            grouped[dataset][key].append(value)
+    aggregated = {
+        dataset: {
+            key: _aggregate_value(values) for key, values in metrics.items()
+        }
+        for dataset, metrics in grouped.items()
+    }
+    return aggregated
 
 
 def _load_bab_run(info_path: Path) -> dict | None:
@@ -30,7 +73,7 @@ def _load_bab_run(info_path: Path) -> dict | None:
     timeout_reached = info.get("overall", {}).get("timeout", False)
     overall_rt = info.get("overall", {}).get("runtime", None)
 
-    dataset, *_ = info_path.parent.name.split("-")
+    dataset = _extract_dataset_name(info_path)
     bounds_path = info_path.parent / "multi_shap_bab_bounds.feather"
     if not bounds_path.exists():
         return {
@@ -40,6 +83,7 @@ def _load_bab_run(info_path: Path) -> dict | None:
             "max_iters_reached": max_iters_reached,
             "timeout_reached": timeout_reached,
             "overall": overall_rt,
+            "iterations": info.get("overall", {}).get("iterations", None),
         }
     bounds = pd.read_feather(bounds_path)
 
@@ -76,6 +120,7 @@ def _load_bab_run(info_path: Path) -> dict | None:
         "max_iters_reached": max_iters_reached,
         "timeout_reached": timeout_reached,
         "overall": overall_rt,
+        "iterations": info.get("overall", {}).get("iterations", None),
         "exact_bounds": exact_bounds,
         "some_separated": some_separated_time,
         "max_norm_to_out_ran_lt_10percent": max_norm1_ran_lt_10percent,
@@ -93,10 +138,11 @@ def _load_exactshap_run(info_path: Path) -> dict | None:
     with info_path.open("r") as f:
         info = yaml.safe_load(f)
 
-    dataset, *_ = info_path.parent.name.split("-")
+    dataset = _extract_dataset_name(info_path)
 
     runtime = info.get("overall", {}).get("runtime", None)
-    return {"dataset": dataset, "overall": runtime}
+    iterations = info.get("overall", {}).get("iterations", None)
+    return {"dataset": dataset, "overall": runtime, "iterations": iterations}
 
 
 def _iter_runs(data_dir: Path, load_run) -> Iterable[dict]:
@@ -107,23 +153,32 @@ def _iter_runs(data_dir: Path, load_run) -> Iterable[dict]:
 
 
 def _load_data_dir(data_dir: Path) -> dict:
-    bab_runs = list(_iter_runs(data_dir / "BaB", _load_bab_run))
-    exactshap_runs = list(_iter_runs(data_dir / "ExactSHAP", _load_exactshap_run))
+    bab_runs_list = list(_iter_runs(data_dir / "BaB", _load_bab_run))
+    exactshap_runs_list = list(_iter_runs(data_dir / "ExactSHAP", _load_exactshap_run))
 
-    if not bab_runs and not exactshap_runs:
+    if not bab_runs_list and not exactshap_runs_list:
         raise SystemExit(f"No runs found in {data_dir}")
 
     data = defaultdict(dict)
-    for run in bab_runs:
-        dataset = run["dataset"]
-        data[dataset]["num_features"] = run["num_features"]
-        data[dataset]["num_effective_features"] = run["num_effective_features"]
-        for key, value in run.items():
-            if key not in ["dataset", "num_features", "num_effective_features"]:
+
+    bab_runs = _aggregate_runs_by_dataset(bab_runs_list)
+    for dataset, metrics in bab_runs.items():
+        data[dataset]["num_features"] = metrics.get("num_features")
+        data[dataset]["num_effective_features"] = metrics.get(
+            "num_effective_features"
+        )
+        for key, value in metrics.items():
+            if key not in ["num_features", "num_effective_features"]:
                 data[dataset][f"bab_{key}"] = value
-    for run in exactshap_runs:
-        dataset = run["dataset"]
-        data[dataset]["exactshap"] = run["overall"]
+
+    exactshap_runs = _aggregate_runs_by_dataset(exactshap_runs_list)
+    for dataset, metrics in exactshap_runs.items():
+        runtime = metrics.get("overall")
+        if runtime is not None:
+            data[dataset]["exactshap"] = runtime
+        iterations = metrics.get("iterations")
+        if iterations is not None:
+            data[dataset]["exactshap_iterations"] = iterations
 
     df = pd.DataFrame.from_dict(data, orient="index")
     df = df.sort_values(by=["num_effective_features", "num_features"])
