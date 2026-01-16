@@ -1,12 +1,12 @@
 # Copyright 2025 David Boetius
 import itertools as it
 from pathlib import Path
+from time import perf_counter
 
 from shap_bounds.logger import ConsoleLogger, FileLogger, JoinLoggers
-from shap_bounds.timer import Timer
 
-from ..runstats import machine_and_code_details
-from .argument_parser import CIFAR10CmdArgs
+from .. import runstats
+from .argument_parser import SuperpixelsCmdArgs
 
 local_resoure_dir = Path(__file__).parent / "resources"
 local_output_dir = Path(__file__).parent / "output"
@@ -14,13 +14,14 @@ local_output_dir = Path(__file__).parent / "output"
 
 if __name__ == "__main__":
     args = (
-        CIFAR10CmdArgs()
+        SuperpixelsCmdArgs()
         .model_args()
         .dataset_args()
         .segmentation_args()
         .feature_args()
         .shap_variant_args()
         .bound_method_args()
+        .timeout_args()
         .logger_args()
         .out_args()
         .parse_args()
@@ -28,15 +29,30 @@ if __name__ == "__main__":
     in_feature = args.feature
 
     loggers = [] if args.silent else [ConsoleLogger()]
-    timer = Timer()
+    stats = {"timeout": False, "max_iters": False}
 
-    with FileLogger(args.out_dir(local_output_dir)) as file_logger:
-        logger = JoinLoggers(*loggers, file_logger)
-        logger.log_config("run_details", machine_and_code_details())
+    out_dir = args.out_dir(local_output_dir)
 
-        with timer["overall"]:
-            bounds_iter = args.bound_method(logger)()
-            iters = range(args.max_iters) if args.max_iters is not None else it.count()
-            list(zip(bounds_iter, iters, strict=False))  # the logger shows the bounds
+    with FileLogger(out_dir) as file_logger:
+        logger_parts = [*loggers, file_logger]
+        logger = JoinLoggers(*logger_parts)
+        logger.log_config("run_details", runstats.machine_and_code_details())
+        logger.log_config("cmd_args", args.all_arguments)
+        logger.log_config("further_stats", args.further_run_stats)
 
-        logger.log_stats("overall", {"runtime": timer.last})
+        bounds_iter = args.bound_method(logger)()
+        iters = it.count()
+        start_time = perf_counter()
+        for i, _ in zip(iters, bounds_iter, strict=False):
+            # The logger shows the bounds, don't have to print here.
+            runtime = perf_counter() - start_time
+            if args.timeout is not None and runtime > args.timeout:
+                print(f"Timeout reached after {runtime:.2f} seconds.")
+                stats["timeout"] = True
+                break
+            if i == args.max_iters:
+                print("Maximum number of iterations reached.")
+                stats["max_iters"] = True
+                break
+
+        logger.log_stats("overall", {"runtime": runtime, "iterations": i, **stats})

@@ -290,10 +290,28 @@ class CmdArgs:
             return int(self.args.output_feature)
 
     @property
-    def data(self) -> Iterable[np.ndarray]:
+    def dataset(self) -> str:
         dataset = self.args.dataset
         if dataset is None:
             dataset, *extra = self.args.model.stem.split("-")
+            if (
+                dataset.lower() == "fashion"
+                and len(extra) >= 1
+                and extra[0].lower() == "mnist"
+            ):
+                dataset = "fashion-mnist"
+            elif (
+                dataset.lower() == "nih"
+                and len(extra) >= 2
+                and extra[0].lower() == "chest"
+                and extra[1].lower() == "xray"
+            ):
+                dataset = "nih-chest-xray"
+        return dataset
+
+    @property
+    def data(self) -> Iterable[np.ndarray]:
+        dataset = self.dataset
         if dataset.lower() == "mnist":
             testset = torchvision.datasets.MNIST(
                 ".datasets",
@@ -302,11 +320,7 @@ class CmdArgs:
                 transform=torchvision.transforms.ToTensor(),
             )
             return NumpyVisionDataset(testset, shape=(1, 28, 28))
-        elif (
-            dataset.lower() == "fashion"
-            and len(extra) >= 1
-            and extra[0].lower() == "mnist"
-        ):
+        elif dataset.lower().replace("-", "").replace("_", "") == "fashionmnist":
             testset = torchvision.datasets.FashionMNIST(
                 ".datasets",
                 train=False,
@@ -380,12 +394,7 @@ class CmdArgs:
             )
             testdata, _ = next(iter(DataLoader(testset, batch_size=1000)))
             return NumpyVisionDataset2(testdata, shape=(3, 32, 32))
-        elif (
-            dataset.lower() == "nih"
-            and len(extra) >= 2
-            and extra[0].lower() == "chest"
-            and extra[1].lower() == "xray"
-        ):
+        elif dataset.lower().replace("-", "").replace("_", "") == "nihchestxray":
             transform = torchvision.transforms.Compose(
                 [
                     torchvision.transforms.Resize((32, 32)),
@@ -453,7 +462,13 @@ class CmdArgs:
 
     @property
     def data_mean(self) -> np.ndarray:
-        return self.data[:].mean(axis=0)
+        dataset = self.dataset
+        if dataset.lower() == "cifar10":
+            resource_dir = Path(__file__).parent / "resources"
+            data_mean = np.load(resource_dir / "cifar10_train_mean.npy")
+            return data_mean
+        else:
+            return self.data[:].mean(axis=0)
 
     @property
     def baseline(self) -> jax.Array | None:

@@ -54,7 +54,6 @@ class VisionPatchesCmdArgs(CmdArgs):
     @property
     def num_patches(self) -> tuple[tuple[int, int, int], int]:
         img_shape = self.img_shape
-        channels = img_shape[0]
         num_patches = self.args.num_patches
         try:
             num_patches = int(num_patches)
