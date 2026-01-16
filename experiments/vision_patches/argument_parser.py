@@ -58,12 +58,12 @@ class VisionPatchesCmdArgs(CmdArgs):
         num_patches = self.args.num_patches
         try:
             num_patches = int(num_patches)
-            # separate all channels
-            num_patches = (channels, num_patches, num_patches)
+            # join all channels
+            num_patches = (1, num_patches, num_patches)
         except ValueError:
             num_patches = tuple(int(x) for x in num_patches.split(","))
             if len(num_patches) == 2:
-                num_patches = (channels, *num_patches)
+                num_patches = (1, *num_patches)
         assert num_patches[0] <= img_shape[0]
         assert num_patches[1] <= img_shape[1]
         assert num_patches[2] <= img_shape[2]
