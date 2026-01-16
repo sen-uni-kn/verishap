@@ -1,6 +1,4 @@
 # Copyright 2025 David Boetius
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Iterable
 
@@ -52,7 +50,8 @@ class VisionPatchesBoundsLogger(Logger):
         self.dpi = dpi
 
         self.mask_idx = self._make_mask_idx()
-        self.cmap = self._load_colormap("vik").reversed()
+        # self.cmap = self._load_colormap("vik").reversed()
+        self.cmap = self._load_colormap("roma")
         self.mid_cmap = self.cmap
         self.fig = None
         self.ax = None
@@ -382,7 +381,7 @@ if __name__ == "__main__":
     bounds_df = pd.read_feather(bounds_path)
     lb_array, ub_array = _bounds_from_frame(bounds_df)
     mids = (lb_array + ub_array) / 2
-    mid_scale = float(np.max(np.abs(mids)))
+    mid_scale = float(np.max(np.abs(mids))) * 1.0
     mid_final = (lb_array[-1] + ub_array[-1]) / 2
     range_scale = float(np.max(np.abs(mid_final)))
 
