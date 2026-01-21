@@ -29,6 +29,15 @@ class SuperpixelsCmdArgs(CmdArgs):
         )
         return self
 
+    def logger_args(self) -> "SuperpixelsCmdArgs":
+        super().logger_args()
+        self.parser.add_argument(
+            "--overlay-logger",
+            action="store_true",
+            help="Enable overlay logging for superpixels bounds.",
+        )
+        return self
+
     # =========================================================================
 
     @property
@@ -79,6 +88,10 @@ class SuperpixelsCmdArgs(CmdArgs):
             return jnp.ones(num_features, dtype=jnp.float32)
         else:
             return jnp.ones_like(self.sample)
+
+    @property
+    def overlay_logger(self) -> bool:
+        return self.args.overlay_logger
 
     def out_file(self, local_output_dir: Path) -> Path:
         if self.args.out_file is None:

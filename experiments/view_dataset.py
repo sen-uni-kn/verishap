@@ -10,9 +10,7 @@ import medmnist
 import numpy as np
 import torch
 import torchvision
-from torch.utils.data import DataLoader
 
-from .argument_parser import NumpyVisionDataset, NumpyVisionDataset2
 from .datasets import NIHChestXrayDataset
 
 
