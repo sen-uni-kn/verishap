@@ -1,7 +1,7 @@
 # Copyright 2025 David Boetius
 import argparse
 from pathlib import Path
-from statistics import NormalDist
+from statistics import NormalDist, median
 
 import numpy as np
 import pandas as pd
@@ -10,12 +10,48 @@ import yaml
 from matplotlib import pyplot as plt
 
 
+def _find_bab_repetition_dirs(bab_network_dir: Path) -> list[Path]:
+    """Find repetition directories (e.g., repeatition_1, repeatition_2, etc.)."""
+    if not bab_network_dir.exists():
+        return []
+    # Look for repeatition_* or repetition_* directories
+    rep_dirs = []
+    for pattern in ["repeatition_*", "repetition_*"]:
+        rep_dirs.extend(bab_network_dir.glob(pattern))
+    # Sort by directory name to ensure consistent ordering
+    return sorted(rep_dirs)
+
+
+def _get_bab_file_path(run_dir: Path, network: str, filename: str) -> Path | None:
+    """Get path to a BaB file, handling both old format and repetition format.
+
+    Returns the first repetition's file path if repetitions exist,
+    otherwise returns the direct path if it exists, or None if neither exists.
+    """
+    bab_network_dir = run_dir / "BaB" / network
+    direct_path = bab_network_dir / filename
+
+    # Check if old format (direct file) exists
+    if direct_path.exists():
+        return direct_path
+
+    # Check for repetition directories
+    rep_dirs = _find_bab_repetition_dirs(bab_network_dir)
+    if rep_dirs:
+        # Use the first repetition
+        first_rep_path = rep_dirs[0] / filename
+        if first_rep_path.exists():
+            return first_rep_path
+
+    return None
+
+
 def _load_bab_final_bounds(
     run_dir: Path, network: str
 ) -> tuple[dict[object, tuple[float, float]], dict[object, float], float]:
-    bounds_path = run_dir / "BaB" / network / "multi_shap_bab_bounds.feather"
-    if not bounds_path.exists():
-        raise SystemExit(f"Missing BaB bounds at {bounds_path}")
+    bounds_path = _get_bab_file_path(run_dir, network, "multi_shap_bab_bounds.feather")
+    if bounds_path is None:
+        raise SystemExit(f"Missing BaB bounds for {network}")
     df = pd.read_feather(bounds_path)
     if df.empty:
         raise SystemExit(f"No BaB bounds found in {bounds_path}")
@@ -45,9 +81,9 @@ def _load_bab_final_bounds(
 
 
 def _load_output_scale(run_dir: Path, network: str) -> float:
-    info_path = run_dir / "BaB" / network / "info.yaml"
-    if not info_path.exists():
-        raise SystemExit(f"Missing BaB info.yaml at {info_path}")
+    info_path = _get_bab_file_path(run_dir, network, "info.yaml")
+    if info_path is None:
+        raise SystemExit(f"Missing BaB info.yaml for {network}")
     with info_path.open("r") as handle:
         info = yaml.safe_load(handle)
     model_output = (
@@ -68,21 +104,69 @@ def _load_output_scale(run_dir: Path, network: str) -> float:
 
 
 def _load_bab_status(run_dir: Path, network: str) -> tuple[bool, float | None]:
-    info_path = run_dir / "BaB" / network / "info.yaml"
-    bounds_path = run_dir / "BaB" / network / "multi_shap_bab_bounds.feather"
-    if not info_path.exists() or not bounds_path.exists():
-        return False, None
-    with info_path.open("r") as handle:
-        info = yaml.safe_load(handle)
-    max_iters_reached = info.get("overall", {}).get("max_iters", False)
-    timeout_reached = info.get("overall", {}).get("timeout", False)
-    is_exact = not max_iters_reached and not timeout_reached
-    if not is_exact:
-        return False, None
-    bounds = pd.read_feather(bounds_path)
-    if bounds.empty or "runtime" not in bounds.columns:
-        return False, None
-    return True, float(bounds["runtime"].iloc[-1])
+    bab_network_dir = run_dir / "BaB" / network
+    rep_dirs = _find_bab_repetition_dirs(bab_network_dir)
+
+    # Check if we have repetitions or old format
+    if rep_dirs:
+        # New format with repetitions
+        all_exact = True
+        runtimes = []
+
+        for rep_dir in rep_dirs:
+            info_path = rep_dir / "info.yaml"
+            bounds_path = rep_dir / "multi_shap_bab_bounds.feather"
+
+            if not info_path.exists() or not bounds_path.exists():
+                all_exact = False
+                continue
+
+            with info_path.open("r") as handle:
+                info = yaml.safe_load(handle)
+
+            max_iters_reached = info.get("overall", {}).get("max_iters", False)
+            timeout_reached = info.get("overall", {}).get("timeout", False)
+            is_exact = not max_iters_reached and not timeout_reached
+
+            if not is_exact:
+                all_exact = False
+                continue
+
+            bounds = pd.read_feather(bounds_path)
+            if bounds.empty or "runtime" not in bounds.columns:
+                all_exact = False
+                continue
+
+            runtimes.append(float(bounds["runtime"].iloc[-1]))
+
+        if not all_exact or not runtimes:
+            return False, None
+
+        # Return median runtime across repetitions
+        return True, median(runtimes)
+    else:
+        # Old format without repetitions
+        info_path = bab_network_dir / "info.yaml"
+        bounds_path = bab_network_dir / "multi_shap_bab_bounds.feather"
+
+        if not info_path.exists() or not bounds_path.exists():
+            return False, None
+
+        with info_path.open("r") as handle:
+            info = yaml.safe_load(handle)
+
+        max_iters_reached = info.get("overall", {}).get("max_iters", False)
+        timeout_reached = info.get("overall", {}).get("timeout", False)
+        is_exact = not max_iters_reached and not timeout_reached
+
+        if not is_exact:
+            return False, None
+
+        bounds = pd.read_feather(bounds_path)
+        if bounds.empty or "runtime" not in bounds.columns:
+            return False, None
+
+        return True, float(bounds["runtime"].iloc[-1])
 
 
 def _get_runtime_at(condition: np.ndarray, iter_times: np.ndarray) -> float | None:
@@ -98,31 +182,59 @@ def _load_bab_runtime_thresholds(
     thresholds: list[float],
     output_scale: float,
 ) -> dict[float, float | None]:
-    bounds_path = run_dir / "BaB" / network / "multi_shap_bab_bounds.feather"
-    if not bounds_path.exists():
-        return {}
-    bounds = pd.read_feather(bounds_path)
-    if "runtime" not in bounds.columns:
-        return {}
-    feature_keys = []
-    for feature_key in bounds.columns.get_level_values(0).unique():
-        if (feature_key, "lb") in bounds.columns and (
-            feature_key,
-            "ub",
-        ) in bounds.columns:
-            feature_keys.append(feature_key)
-    if not feature_keys:
-        return {}
-    lbs = np.array([bounds[(key, "lb")] for key in feature_keys]).T
-    ubs = np.array([bounds[(key, "ub")] for key in feature_keys]).T
-    half_width = (ubs - lbs) / 2.0
-    max_norm = (half_width / output_scale).max(axis=1)
-    iter_times = bounds["runtime"].to_numpy()
-    runtimes = {}
-    for threshold in thresholds:
-        fraction = threshold / output_scale
-        runtimes[threshold] = _get_runtime_at(max_norm <= fraction, iter_times)
-    return runtimes
+    bab_network_dir = run_dir / "BaB" / network
+    rep_dirs = _find_bab_repetition_dirs(bab_network_dir)
+
+    # Helper function to compute runtimes for a single bounds file
+    def compute_runtimes_single(bounds_path: Path) -> dict[float, float | None]:
+        if not bounds_path.exists():
+            return {}
+        bounds = pd.read_feather(bounds_path)
+        if "runtime" not in bounds.columns:
+            return {}
+        feature_keys = []
+        for feature_key in bounds.columns.get_level_values(0).unique():
+            if (feature_key, "lb") in bounds.columns and (
+                feature_key,
+                "ub",
+            ) in bounds.columns:
+                feature_keys.append(feature_key)
+        if not feature_keys:
+            return {}
+        lbs = np.array([bounds[(key, "lb")] for key in feature_keys]).T
+        ubs = np.array([bounds[(key, "ub")] for key in feature_keys]).T
+        half_width = (ubs - lbs) / 2.0
+        max_norm = (half_width / output_scale).max(axis=1)
+        iter_times = bounds["runtime"].to_numpy()
+        runtimes = {}
+        for threshold in thresholds:
+            fraction = threshold / output_scale
+            runtimes[threshold] = _get_runtime_at(max_norm <= fraction, iter_times)
+        return runtimes
+
+    if rep_dirs:
+        # New format with repetitions - compute median runtime across repetitions
+        all_runtimes = {threshold: [] for threshold in thresholds}
+
+        for rep_dir in rep_dirs:
+            bounds_path = rep_dir / "multi_shap_bab_bounds.feather"
+            rep_runtimes = compute_runtimes_single(bounds_path)
+            for threshold, runtime in rep_runtimes.items():
+                if runtime is not None:
+                    all_runtimes[threshold].append(runtime)
+
+        # Compute median for each threshold
+        result = {}
+        for threshold in thresholds:
+            if all_runtimes[threshold]:
+                result[threshold] = median(all_runtimes[threshold])
+            else:
+                result[threshold] = None
+        return result
+    else:
+        # Old format without repetitions
+        bounds_path = bab_network_dir / "multi_shap_bab_bounds.feather"
+        return compute_runtimes_single(bounds_path)
 
 
 def _compute_output_ticks(output_scale: float, max_error: float) -> list[float]:
@@ -243,8 +355,30 @@ def _load_sampling_errors(
             sub["estimator"] = estimator
             records.append(sub)
         else:
-            num_samples = int(stats_path.parent.name)
-            seed = stats_path.parents[1].name
+            # Extract num_samples and seed from path
+            # Handle both old format (estimator/network/seed/num_samples/) and
+            # new format with repetitions (estimator/network/repetition/seed/num_samples/)
+            parent = stats_path.parent
+            num_samples = int(parent.name)
+
+            # Walk up the path to find seed
+            seed = None
+            for p in stats_path.parents:
+                # Skip the parent (num_samples directory)
+                if p == parent:
+                    continue
+                # Stop at the network directory
+                if p == sampling_root:
+                    break
+                # Check if this looks like a seed directory (not a repetition directory)
+                if not (p.name.startswith("repeatition_") or p.name.startswith("repetition_")):
+                    seed = p.name
+                    break
+
+            if seed is None:
+                # Fallback to old behavior
+                seed = stats_path.parents[1].name
+
             sub = pd.DataFrame({"error": errors})
             sub["num_samples"] = num_samples
             sub["seed"] = seed
