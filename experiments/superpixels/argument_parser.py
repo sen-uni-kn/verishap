@@ -56,6 +56,9 @@ class SuperpixelsCmdArgs(CmdArgs):
         if self.dataset.lower() == "cifar10":
             resources_dir = Path(__file__).parent / "resources"
             return resources_dir / "cifar10_superpixels_100"
+        elif self.dataset.lower() == "gtsrb":
+            resources_dir = Path(__file__).parent / "resources"
+            return resources_dir / "gtsrb_superpixels_100"
         else:
             raise ValueError(f"Unknown dataset: {self.dataset}")
 

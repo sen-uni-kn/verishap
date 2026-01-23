@@ -8,6 +8,7 @@ import pandas as pd
 import skimage.color
 from matplotlib import colormaps, colors
 from matplotlib import pyplot as plt
+from skimage.segmentation import find_boundaries
 from tqdm import tqdm
 
 from shap_bounds.logger import Logger
@@ -32,6 +33,7 @@ class SuperpixelsBoundsLogger(Logger):
         show: bool = True,
         base_alpha: float = 0.7,
         dpi: int = 150,
+        scale_factor: int = 1,
         midpoint_scale_max_abs: float | None = None,
         range_scale_max_abs: float | None = None,
         separate_colorbar: bool = False,
@@ -48,6 +50,7 @@ class SuperpixelsBoundsLogger(Logger):
         self.show = show
         self.base_alpha = base_alpha
         self.dpi = dpi
+        self.scale_factor = max(int(scale_factor), 1)
         self._pad_inches = 0.15 if more_space else 0.0
 
         self.mask_idx = self._make_mask_idx()
@@ -105,6 +108,10 @@ class SuperpixelsBoundsLogger(Logger):
             mask = self.masks[i, 0]  # Get the 2D mask for this superpixel
             mask_idx[mask > 0] = i
 
+        if self.scale_factor > 1:
+            mask_idx = np.repeat(mask_idx, self.scale_factor, axis=0)
+            mask_idx = np.repeat(mask_idx, self.scale_factor, axis=1)
+
         return mask_idx
 
     def _ensure_figure(self):
@@ -144,7 +151,26 @@ class SuperpixelsBoundsLogger(Logger):
             base = self.sample[0]
         else:
             base = np.moveaxis(self.sample, 0, -1)
-        return np.clip(base, 0.0, 1.0)
+        base = np.clip(base, 0.0, 1.0)
+        if self.scale_factor > 1:
+            if base.ndim == 2:
+                base = np.repeat(base, self.scale_factor, axis=0)
+                base = np.repeat(base, self.scale_factor, axis=1)
+            else:
+                base = np.repeat(base, self.scale_factor, axis=0)
+                base = np.repeat(base, self.scale_factor, axis=1)
+        return self._add_superpixel_borders(base)
+
+    def _add_superpixel_borders(self, base: np.ndarray) -> np.ndarray:
+        boundaries = find_boundaries(self.mask_idx, mode="inner")
+        if not np.any(boundaries):
+            return base
+        bordered = np.array(base, copy=True)
+        if bordered.ndim == 2:
+            bordered[boundaries] = 1.0
+        else:
+            bordered[boundaries, :] = 1.0
+        return bordered
 
     def _init_colorbars(self):
         self.mid_norm = colors.Normalize(vmin=-1.0, vmax=1.0)
@@ -356,6 +382,13 @@ def _iter_bounds(
         yield lb, ub
 
 
+def _infer_num_features(bounds: tuple[np.ndarray, np.ndarray]) -> int:
+    lbs, _ = bounds
+    if lbs.ndim <= 1:
+        return 1
+    return int(lbs.shape[1])
+
+
 if __name__ == "__main__":
     from .argument_parser import SuperpixelsCmdArgs
 
@@ -382,6 +415,12 @@ if __name__ == "__main__":
     cmd_args.parser.add_argument("--no-show", action="store_true")
     cmd_args.parser.add_argument("--dpi", type=int, default=150)
     cmd_args.parser.add_argument(
+        "--scale",
+        type=int,
+        default=1,
+        help="Scale factor for the base image and masks when rendering overlays.",
+    )
+    cmd_args.parser.add_argument(
         "--separate-colormap",
         action="store_true",
         help="Save overlay images and colormap images as separate files.",
@@ -397,6 +436,9 @@ if __name__ == "__main__":
     bounds_path = args.args.bounds
     bounds_df = pd.read_feather(bounds_path)
     lb_array, ub_array = _bounds_from_frame(bounds_df)
+    inferred_num_features = _infer_num_features((lb_array, ub_array))
+    if args.args.num_features != inferred_num_features:
+        args.args.num_features = inferred_num_features
     mids = (lb_array + ub_array) / 2
     mid_scale = float(np.max(np.abs(mids))) * 1.0
     mid_final = (lb_array[-1] + ub_array[-1]) / 2
@@ -413,6 +455,7 @@ if __name__ == "__main__":
         feature=args.feature,
         show=not args.args.no_show,
         dpi=args.args.dpi,
+        scale_factor=args.args.scale,
         midpoint_scale_max_abs=mid_scale,
         range_scale_max_abs=range_scale,
         separate_colorbar=args.args.separate_colormap,
