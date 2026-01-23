@@ -544,7 +544,9 @@ def _plot_error_summary(
     y_axis_scale: str,
     area_mode: str,
     area_alpha: float | None,
+    x_max: float | None = None,
     title: str | None = None,
+    estimators_only: bool = False,
 ) -> None:
     estimator_order = list(error_summary["estimator"].unique())
     estimator_colors = dict(
@@ -582,7 +584,15 @@ def _plot_error_summary(
             )
     ax.set_xscale("log")
     ax.set_yscale("log" if y_axis_scale == "log" else "linear")
-    if ticks:
+    if x_max is not None:
+        # Get current x limits to preserve the minimum
+        x_min_current, _ = ax.get_xlim()
+        ax.set_xlim(x_min_current, x_max)
+    if estimators_only:
+        # When estimators_only is True, scale y-axis to the data range
+        if not np.isnan(y_min) and not np.isnan(y_max):
+            ax.set_ylim(y_min, y_max)
+    elif ticks:
         ticks_sorted = list(ticks)
         if exact_tick is not None:
             ticks_sorted.append(exact_tick)
@@ -648,12 +658,32 @@ def _plot_network(
     area_alpha: float | None,
     ci_multiplier: float | None,
     dump_data: bool,
+    x_max_spec: str | None = None,
+    estimators_only: bool = False,
 ) -> plt.Figure | None:
     bounds, true_values, last_bound_half_width = _load_bab_final_bounds(
         run_dir, network
     )
     output_scale = _load_output_scale(run_dir, network)
     is_exact, exact_runtime = _load_bab_status(run_dir, network)
+
+    # Parse x_max specification
+    x_max = None
+    if x_max_spec is not None:
+        if x_max_spec.endswith('n'):
+            # Format: "NUMBERn" means NUMBER * num_features
+            try:
+                multiplier = float(x_max_spec[:-1])
+                num_features = len(bounds)
+                x_max = multiplier * num_features
+            except ValueError as exc:
+                raise SystemExit(f"Invalid --xmax format: {x_max_spec}. Expected number or 'NUMBERn'.") from exc
+        else:
+            # Direct numerical value
+            try:
+                x_max = float(x_max_spec)
+            except ValueError as exc:
+                raise SystemExit(f"Invalid --xmax value: {x_max_spec}. Expected number or 'NUMBERn'.") from exc
     runs_list = []
     for estimator in estimators:
         runs = _load_sampling_errors(
@@ -690,17 +720,33 @@ def _plot_network(
         run_dir, network, ticks, output_scale
     )
     exact_tick = output_scale * 1e-6 if is_exact else None
-    y_min = min(ticks)
-    if exact_tick is not None:
-        y_min = min(y_min, exact_tick)
-    if not is_exact and last_bound_half_width > 0:
-        y_min = min(y_min, last_bound_half_width)
-    y_min = max(y_min, 1e-12)
-    y_max = max(max_error, max(ticks))
-    if exact_tick is not None:
-        y_max = max(y_max, exact_tick)
-    if not is_exact and last_bound_half_width > 0:
-        y_max = max(y_max, last_bound_half_width)
+    if estimators_only:
+        # Scale y-axis to the actual error range
+        min_error = float(summary["min_error"].min())
+        if not highlight_vals.empty:
+            min_error = min(min_error, float(highlight_vals["error"].min()))
+            max_error = max(max_error, float(highlight_vals["error"].max()))
+        # Add some padding for better visualization
+        if y_axis_scale == "log":
+            y_min = min_error * 0.8
+            y_max = max_error * 1.2
+        else:
+            margin = (max_error - min_error) * 0.1
+            y_min = min_error - margin
+            y_max = max_error + margin
+        y_min = max(y_min, 1e-12)
+    else:
+        y_min = min(ticks)
+        if exact_tick is not None:
+            y_min = min(y_min, exact_tick)
+        if not is_exact and last_bound_half_width > 0:
+            y_min = min(y_min, last_bound_half_width)
+        y_min = max(y_min, 1e-12)
+        y_max = max(max_error, max(ticks))
+        if exact_tick is not None:
+            y_max = max(y_max, exact_tick)
+        if not is_exact and last_bound_half_width > 0:
+            y_max = max(y_max, last_bound_half_width)
     out_csv = _resolve_out_path(run_dir, out_name, network, multi_networks)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     if not summary.empty:
@@ -724,7 +770,9 @@ def _plot_network(
         y_axis_scale,
         area_mode,
         area_alpha,
+        x_max=x_max,
         title=f"Sampling error for {network}",
+        estimators_only=estimators_only,
     )
     fig.tight_layout()
     return fig
@@ -744,6 +792,8 @@ def main(
     area_alpha: float | None,
     ci_multiplier: float | None,
     dump_data: bool,
+    x_max_spec: str | None = None,
+    estimators_only: bool = False,
 ) -> None:
     if sampling_estimators is None or any(
         estimator.lower() == "all" for estimator in sampling_estimators
@@ -775,6 +825,8 @@ def main(
             area_alpha,
             ci_multiplier,
             dump_data,
+            x_max_spec=x_max_spec,
+            estimators_only=estimators_only,
         )
         if fig is not None:
             figures.append(fig)
@@ -856,6 +908,16 @@ if __name__ == "__main__":
             "containing the plotted data (highlight where available, otherwise summary)."
         ),
     )
+    parser.add_argument(
+        "--xmax",
+        type=str,
+        default=None,
+        help=(
+            "Maximum value for the x-axis (number of samples). Can be a direct number "
+            "(e.g., '1000') or 'NUMBERn' format (e.g., '64n') where NUMBER is multiplied "
+            "by the number of features. For example, '64n' with 12 features sets xmax to 768."
+        ),
+    )
     args = parser.parse_args()
     networks_arg = args.networks
     all_networks = networks_arg.lower() == "all"
@@ -875,4 +937,6 @@ if __name__ == "__main__":
         area_alpha,
         ci_multiplier,
         args.dump_data,
+        x_max_spec=args.xmax,
+        estimators_only=args.estimators_only,
     )
