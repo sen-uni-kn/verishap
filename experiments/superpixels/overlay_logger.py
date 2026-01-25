@@ -31,7 +31,7 @@ class SuperpixelsBoundsLogger(Logger):
         output_dir: Path,
         feature: int | None = None,
         show: bool = True,
-        base_alpha: float = 0.7,
+        base_alpha: float = 0.5,
         dpi: int = 150,
         scale_factor: int = 1,
         midpoint_scale_max_abs: float | None = None,
@@ -133,10 +133,8 @@ class SuperpixelsBoundsLogger(Logger):
         )
         self.combined_colorbar_ax = self.fig.add_subplot(right[:5, 0])
         base_image = self._base_image()
-        if base_image.ndim == 2:
-            self.base_artist = self.ax.imshow(base_image, cmap="gray", vmin=0, vmax=1)
-        else:
-            self.base_artist = self.ax.imshow(base_image, vmin=0, vmax=1)
+        # Always use grayscale colormap since _base_image() converts to grayscale
+        self.base_artist = self.ax.imshow(base_image, cmap="gray", vmin=0, vmax=1)
         overlay = np.zeros((*base_image.shape[:2], 4), dtype=np.float32)
         self.overlay_artist = self.ax.imshow(overlay)
         self.iter_ax = self.fig.add_subplot(right[5:, 0])
@@ -152,6 +150,9 @@ class SuperpixelsBoundsLogger(Logger):
         else:
             base = np.moveaxis(self.sample, 0, -1)
         base = np.clip(base, 0.0, 1.0)
+        # Convert to grayscale if multi-channel
+        if base.ndim == 3 and base.shape[-1] > 1:
+            base = skimage.color.rgb2gray(base)
         if self.scale_factor > 1:
             if base.ndim == 2:
                 base = np.repeat(base, self.scale_factor, axis=0)
@@ -293,10 +294,9 @@ class SuperpixelsBoundsLogger(Logger):
             extent=self._combined_colorbar_extent,
             aspect="auto",
         )
-        ax.set_xlabel("bounds range")
-        ax.set_ylabel("midpoint")
+        ax.set_axis_off()
         fig.tight_layout()
-        fig.savefig(base_path, dpi=self.dpi, bbox_inches="tight", pad_inches=0.05)
+        fig.savefig(base_path, dpi=self.dpi, bbox_inches="tight", pad_inches=0.0)
         plt.close(fig)
         xmin, xmax, ymin, ymax = self._combined_colorbar_extent
         scale_path = base_path.with_suffix(".txt")
@@ -430,7 +430,24 @@ if __name__ == "__main__":
         action="store_true",
         help="Add a small margin around saved images.",
     )
+    cmd_args.parser.add_argument(
+        "--midscale-use-final",
+        action="store_true",
+        help="Use the final midpoint value for the midscale colorbar.",
+    )
     cmd_args.parser.add_argument("--speed", type=int, default=1)
+    cmd_args.parser.add_argument(
+        "--start",
+        type=int,
+        default=0,
+        help="Start frame/iteration (inclusive, default: 0).",
+    )
+    cmd_args.parser.add_argument(
+        "--end",
+        type=int,
+        default=None,
+        help="End frame/iteration (exclusive, default: last frame).",
+    )
     args = cmd_args.parse_args()
 
     bounds_path = args.args.bounds
@@ -440,8 +457,11 @@ if __name__ == "__main__":
     if args.args.num_features != inferred_num_features:
         args.args.num_features = inferred_num_features
     mids = (lb_array + ub_array) / 2
-    mid_scale = float(np.max(np.abs(mids))) * 1.0
     mid_final = (lb_array[-1] + ub_array[-1]) / 2
+    if args.args.midscale_use_final:
+        mid_scale = float(np.max(np.abs(mid_final))) * 1.5
+    else:
+        mid_scale = float(np.max(np.abs(mids))) * 1.0
     range_scale = float(np.max(np.abs(mid_final)))
 
     sample = args.sample
@@ -463,8 +483,21 @@ if __name__ == "__main__":
     )
 
     speed = args.args.speed
-    for i, (lb, ub) in tqdm(enumerate(_iter_bounds(bounds_df)), total=len(bounds_df)):
+    start_frame = args.args.start
+    end_frame = args.args.end if args.args.end is not None else len(bounds_df)
+    end_frame = min(end_frame, len(bounds_df))
+
+    total_frames = end_frame - start_frame
+    last_i = None
+    for i, (lb, ub) in tqdm(
+        enumerate(_iter_bounds(bounds_df)), total=total_frames, initial=start_frame
+    ):
+        if i < start_frame:
+            continue
+        if i >= end_frame:
+            break
         if i % speed == 0:
             logger.log_bounds("replay", i, (lb, ub))
-    if i % speed != 0:
-        logger.log_bounds("replay", i, (lb, ub))
+        last_i = i
+    if last_i is not None and last_i % speed != 0:
+        logger.log_bounds("replay", last_i, (lb, ub))

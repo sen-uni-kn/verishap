@@ -309,6 +309,7 @@ def _compute_aggregated_error(
     true_vals = np.array([true_values[col] for col in feature_cols])
     use_bounds = np.isnan(true_vals).any()
     if use_bounds:
+        print("Using bounds for error calculation.")
         lower = np.array([bounds[col][0] for col in feature_cols])
         upper = np.array([bounds[col][1] for col in feature_cols])
         # Optimistic error calculation
@@ -322,7 +323,7 @@ def _compute_aggregated_error(
     if agg_mode == "l1":
         return pd.Series(errors.mean(axis=1), index=df.index)
     if agg_mode == "l2":
-        return pd.Series(np.sqrt(np.square(errors).mean(axis=1)), index=df.index)
+        return pd.Series(np.square(errors).mean(axis=1), index=df.index)
     if agg_mode == "linf":
         return pd.Series(errors.max(axis=1), index=df.index)
     raise ValueError(f"Unknown aggregation mode: {agg_mode}")
