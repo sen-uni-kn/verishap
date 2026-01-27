@@ -9,6 +9,7 @@ __all__ = [
     "BranchQueue",
 ]
 
+
 class BranchQueue[D: PyTree]:
     """A batched queue for storing branches in branch and bound.
 
@@ -121,11 +122,9 @@ class BranchQueue[D: PyTree]:
             The first batch is filled up to the batch size.
             The second batch contains any remaining data.
         """
-        data = [
-            jnp.concat([ld, rd]) for ld, rd in zip(left, right, strict=True)
-        ]
-        left = [d[:self.batch_size] for d in data]
-        right = [d[self.batch_size:] for d in data]
+        data = [jnp.concat([ld, rd]) for ld, rd in zip(left, right, strict=True)]
+        left = [d[: self.batch_size] for d in data]
+        right = [d[self.batch_size :] for d in data]
         return left, right
 
     def _empty_node(self) -> list[Array]:

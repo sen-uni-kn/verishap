@@ -228,7 +228,9 @@ class PriorityBranchStore[D: PyTree]:
         Args:
             max_priority: The maximum priority of the branches to drop.
         """
-        while len(self.__nodes) > 0 and self.__nodes[-1].highest_priority <= max_priority:
+        while (
+            len(self.__nodes) > 0 and self.__nodes[-1].highest_priority <= max_priority
+        ):
             self.__nodes.pop()
             self.__size -= self.batch_size
         if len(self.__buffer) > 0 and self.__buffer.highest_priority <= max_priority:

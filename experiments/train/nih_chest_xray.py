@@ -31,7 +31,12 @@ MODEL_CLS = partial(
     CNN,
     (1, 100, 100),
     1,
-    conv_layers=[{"channels": 16}, {"channels": 32}, {"channels": 64}, {"channels": 128}],
+    conv_layers=[
+        {"channels": 16},
+        {"channels": 32},
+        {"channels": 64},
+        {"channels": 128},
+    ],
     fc_in_sizes=(4608, 256),
 )
 

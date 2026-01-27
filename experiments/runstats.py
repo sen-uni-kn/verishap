@@ -44,8 +44,14 @@ def machine_and_code_details() -> dict[str, str | int | float]:
             "physical cores": psutil.cpu_count(logical=False),
             "logical cores": psutil.cpu_count(logical=True),
         },
-        "memory": {"total": f"{memory_stats.total / (1024**3)} GB", "used": f"{memory_stats.percent}%"},
-        "swap": {"total": f"{swap_stats.total / (1024**3)} GB", "used": f"{swap_stats.percent}%"},
+        "memory": {
+            "total": f"{memory_stats.total / (1024**3)} GB",
+            "used": f"{memory_stats.percent}%",
+        },
+        "swap": {
+            "total": f"{swap_stats.total / (1024**3)} GB",
+            "used": f"{swap_stats.percent}%",
+        },
     }
     gpus = GPUtil.getGPUs()
     info["GPUs"] = len(gpus)

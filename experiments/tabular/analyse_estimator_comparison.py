@@ -372,7 +372,10 @@ def _load_sampling_errors(
                 if p == sampling_root:
                     break
                 # Check if this looks like a seed directory (not a repetition directory)
-                if not (p.name.startswith("repeatition_") or p.name.startswith("repetition_")):
+                if not (
+                    p.name.startswith("repeatition_")
+                    or p.name.startswith("repetition_")
+                ):
                     seed = p.name
                     break
 
@@ -500,7 +503,9 @@ def _merge_highlight_columns(
 ) -> pd.DataFrame:
     if highlight_vals.empty:
         return data
-    pivot = highlight_vals.pivot(index="num_samples", columns="estimator", values="error")
+    pivot = highlight_vals.pivot(
+        index="num_samples", columns="estimator", values="error"
+    )
     pivot = pivot.rename(columns=lambda est: f"{est}_highlight_error")
     pivot = pivot.reset_index()
     return data.merge(pivot, on="num_samples", how="left")
@@ -555,7 +560,9 @@ def _plot_error_summary(
     )
     if area_mode != "none":
         area_label = (
-            "range" if area_mode == "range" or area_alpha is None else f"CI α={area_alpha:g}"
+            "range"
+            if area_mode == "range" or area_alpha is None
+            else f"CI α={area_alpha:g}"
         )
         for estimator, group in error_summary.groupby("estimator"):
             group = group.sort_values("num_samples")
@@ -671,20 +678,24 @@ def _plot_network(
     # Parse x_max specification
     x_max = None
     if x_max_spec is not None:
-        if x_max_spec.endswith('n'):
+        if x_max_spec.endswith("n"):
             # Format: "NUMBERn" means NUMBER * num_features
             try:
                 multiplier = float(x_max_spec[:-1])
                 num_features = len(bounds)
                 x_max = multiplier * num_features
             except ValueError as exc:
-                raise SystemExit(f"Invalid --xmax format: {x_max_spec}. Expected number or 'NUMBERn'.") from exc
+                raise SystemExit(
+                    f"Invalid --xmax format: {x_max_spec}. Expected number or 'NUMBERn'."
+                ) from exc
         else:
             # Direct numerical value
             try:
                 x_max = float(x_max_spec)
             except ValueError as exc:
-                raise SystemExit(f"Invalid --xmax value: {x_max_spec}. Expected number or 'NUMBERn'.") from exc
+                raise SystemExit(
+                    f"Invalid --xmax value: {x_max_spec}. Expected number or 'NUMBERn'."
+                ) from exc
     runs_list = []
     for estimator in estimators:
         runs = _load_sampling_errors(

@@ -9,6 +9,7 @@ __all__ = [
     "BranchStack",
 ]
 
+
 class BranchStack[D: PyTree]:
     """A batched stack for storing branches in branch and bound.
 
@@ -68,7 +69,6 @@ class BranchStack[D: PyTree]:
         self.__size += branches[0].shape[0]
         self.__stack.append(branches)
 
-
     def pop(self, return_size: bool = False) -> tuple[D, int] | D:
         """Returns the last batch from the stack.
 
@@ -82,8 +82,8 @@ class BranchStack[D: PyTree]:
             if remaining[0].shape[0] > 0:
                 self.__stack.append(remaining)
         if data[0].shape[0] > self.batch_size:
-            data = [d[:self.batch_size] for d in data]
-            remaining = [d[self.batch_size:] for d in data]
+            data = [d[: self.batch_size] for d in data]
+            remaining = [d[self.batch_size :] for d in data]
             self.__stack.append(remaining)
 
         removed_size = data[0].shape[0]
@@ -108,9 +108,7 @@ class BranchStack[D: PyTree]:
             The first batch is filled up to the batch size.
             The second batch contains any remaining data.
         """
-        data = [
-            jnp.concat([ld, rd]) for ld, rd in zip(left, right, strict=True)
-        ]
-        left = [d[:self.batch_size] for d in data]
-        right = [d[self.batch_size:] for d in data]
+        data = [jnp.concat([ld, rd]) for ld, rd in zip(left, right, strict=True)]
+        left = [d[: self.batch_size] for d in data]
+        right = [d[self.batch_size :] for d in data]
         return left, right

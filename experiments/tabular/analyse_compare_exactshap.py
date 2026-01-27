@@ -51,9 +51,7 @@ def _aggregate_runs_by_dataset(runs: Iterable[dict]) -> dict[str, dict[str, Any]
                 continue
             grouped[dataset][key].append(value)
     aggregated = {
-        dataset: {
-            key: _aggregate_value(values) for key, values in metrics.items()
-        }
+        dataset: {key: _aggregate_value(values) for key, values in metrics.items()}
         for dataset, metrics in grouped.items()
     }
     return aggregated
@@ -164,9 +162,7 @@ def _load_data_dir(data_dir: Path) -> dict:
     bab_runs = _aggregate_runs_by_dataset(bab_runs_list)
     for dataset, metrics in bab_runs.items():
         data[dataset]["num_features"] = metrics.get("num_features")
-        data[dataset]["num_effective_features"] = metrics.get(
-            "num_effective_features"
-        )
+        data[dataset]["num_effective_features"] = metrics.get("num_effective_features")
         for key, value in metrics.items():
             if key not in ["num_features", "num_effective_features"]:
                 data[dataset][f"bab_{key}"] = value

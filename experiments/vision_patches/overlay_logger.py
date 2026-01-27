@@ -444,10 +444,12 @@ if __name__ == "__main__":
     start_frame = args.args.start
     end_frame = args.args.end if args.args.end is not None else len(bounds_df)
     end_frame = min(end_frame, len(bounds_df))
-    
+
     total_frames = end_frame - start_frame
     last_i = None
-    for i, (lb, ub) in tqdm(enumerate(_iter_bounds(bounds_df)), total=total_frames, initial=start_frame):
+    for i, (lb, ub) in tqdm(
+        enumerate(_iter_bounds(bounds_df)), total=total_frames, initial=start_frame
+    ):
         if i < start_frame:
             continue
         if i >= end_frame:
