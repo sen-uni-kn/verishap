@@ -150,12 +150,14 @@ def _load_bab_all_runtime_thresholds(
     ubs = np.array([bounds[(key, "ub")] for key in feature_keys]).T
     half_width = (ubs - lbs) / 2.0
     max_half_width = half_width.max(axis=1)
-    result = pd.DataFrame({
-        "iteration": np.arange(len(max_half_width)),
-        "runtime": bounds["runtime"].to_numpy(),
-        "max_half_width": max_half_width,
-        "max_half_width_pct": (max_half_width / output_scale) * 100.0,
-    })
+    result = pd.DataFrame(
+        {
+            "iteration": np.arange(len(max_half_width)),
+            "runtime": bounds["runtime"].to_numpy(),
+            "max_half_width": max_half_width,
+            "max_half_width_pct": (max_half_width / output_scale) * 100.0,
+        }
+    )
     return result
 
 
@@ -571,7 +573,9 @@ def _plot_error_summary(
             else:
                 runtime_labels.append(f"{runtime:.1f}s")
         ax_right.set_yticklabels(runtime_labels, fontsize=12, fontweight="bold")
-        ax_right.set_ylabel("BaB runtime to reach error", fontsize=12, fontweight="bold")
+        ax_right.set_ylabel(
+            "BaB runtime to reach error", fontsize=12, fontweight="bold"
+        )
     bab_color = "#8B0000"  # Dark red for BaB results
     if not is_exact and last_bound_half_width > 0:
         ax.axhline(
@@ -635,15 +639,19 @@ def _plot_network(
     bab_runtime_data = _load_bab_all_runtime_thresholds(run_dir, network, output_scale)
 
     # Print runtime information to console
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print(f"Network: {network}")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
 
     if not bab_runtime_data.empty:
         print(f"\nBaB Runtime Progress:")
         print(f"  Final runtime: {bab_runtime_data['runtime'].iloc[-1]:.2f}s")
-        print(f"  Final max half-width: {bab_runtime_data['max_half_width'].iloc[-1]:.6e}")
-        print(f"  Final max half-width (%): {bab_runtime_data['max_half_width_pct'].iloc[-1]:.4f}%")
+        print(
+            f"  Final max half-width: {bab_runtime_data['max_half_width'].iloc[-1]:.6e}"
+        )
+        print(
+            f"  Final max half-width (%): {bab_runtime_data['max_half_width_pct'].iloc[-1]:.4f}%"
+        )
         print(f"  Total iterations: {len(bab_runtime_data)}")
         if is_exact:
             print(f"  Status: EXACT (runtime: {exact_runtime:.2f}s)")

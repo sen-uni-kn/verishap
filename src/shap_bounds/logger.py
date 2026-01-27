@@ -24,7 +24,11 @@ class Logger(Protocol):
     ): ...
 
     def log_iter_stats(
-        self, function_name: str, i: int | tuple[int, ...], stats1: dict | None = None, **stats2
+        self,
+        function_name: str,
+        i: int | tuple[int, ...],
+        stats1: dict | None = None,
+        **stats2,
     ): ...
 
     def log_bounds(
@@ -65,7 +69,11 @@ class ConsoleLogger(Logger):
             print(", ".join(f"{k}: {v}" for k, v in stats.items()))
 
     def log_iter_stats(
-        self, function_name: str, i: int | tuple[int, ...], stats1: dict | None = None, **stats2
+        self,
+        function_name: str,
+        i: int | tuple[int, ...],
+        stats1: dict | None = None,
+        **stats2,
     ):
         self._log_new_function(function_name)
         stats = stats2 if stats1 is None else stats1 | stats2
@@ -122,7 +130,11 @@ class FileLogger(Logger):
         self.info[function_name] = stats
 
     def log_iter_stats(
-        self, function_name: str, i: int | tuple[int, ...], stats1: dict | None = None, **stats2
+        self,
+        function_name: str,
+        i: int | tuple[int, ...],
+        stats1: dict | None = None,
+        **stats2,
     ):
         stats = stats2 if stats1 is None else stats1 | stats2
         if function_name not in self.iter_stats:
@@ -130,8 +142,9 @@ class FileLogger(Logger):
         if isinstance(i, int):
             self.iter_stats[function_name].append({"iteration": i} | stats)
         else:
-            self.iter_stats[function_name].append({f"iter_key_{j}": k for j, k in enumerate(i)} | stats)
-
+            self.iter_stats[function_name].append(
+                {f"iter_key_{j}": k for j, k in enumerate(i)} | stats
+            )
 
     def log_bounds(
         self,
@@ -164,7 +177,9 @@ class FileLogger(Logger):
         for function_name, iter_stats in self.iter_stats.items():
             iter_stats_file = self.directory / f"{function_name}_iter_stats.feather"
             iter_stats = pd.DataFrame(iter_stats)
-            iter_stats.to_feather(iter_stats_file, compression="zstd", compression_level=9)
+            iter_stats.to_feather(
+                iter_stats_file, compression="zstd", compression_level=9
+            )
             print(f"{function_name} iteration statistics saved to {iter_stats_file}.")
 
         for function_name, bounds in self.bounds.items():
@@ -213,7 +228,11 @@ class JoinLoggers(Logger):
             logger.log_stats(function_name, stats1, temporary=temporary, **stats2)
 
     def log_iter_stats(
-        self, function_name: str, i: int | tuple[int, ...], stats1: dict | None = None, **stats2
+        self,
+        function_name: str,
+        i: int | tuple[int, ...],
+        stats1: dict | None = None,
+        **stats2,
     ):
         for logger in self.loggers:
             logger.log_iter_stats(function_name, i, stats1, **stats2)

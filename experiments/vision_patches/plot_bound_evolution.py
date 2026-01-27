@@ -54,15 +54,29 @@ def load_bounds_data(bounds_path: Path) -> tuple[pd.DataFrame, int]:
     # Check if it's the bounds file (has feature columns) or iter_stats file
     if isinstance(bounds_df.columns, pd.MultiIndex):
         # Multi-index columns like ('0', 'lb'), ('0', 'ub')
-        num_features = len([col for col in bounds_df.columns.get_level_values(0).unique() if col != 'runtime'])
+        num_features = len(
+            [
+                col
+                for col in bounds_df.columns.get_level_values(0).unique()
+                if col != "runtime"
+            ]
+        )
     elif any(col[0].isdigit() for col in bounds_df.columns if isinstance(col, tuple)):
         # Columns are tuples like ('0', 'lb')
-        num_features = len([col for col in bounds_df.columns if isinstance(col, tuple) and col[1] == 'lb'])
+        num_features = len(
+            [
+                col
+                for col in bounds_df.columns
+                if isinstance(col, tuple) and col[1] == "lb"
+            ]
+        )
     else:
         # Try to infer from column names
-        feature_cols = [col for col in bounds_df.columns if isinstance(col, tuple) and len(col) == 2]
+        feature_cols = [
+            col for col in bounds_df.columns if isinstance(col, tuple) and len(col) == 2
+        ]
         if feature_cols:
-            num_features = len([col for col in feature_cols if col[1] == 'lb'])
+            num_features = len([col for col in feature_cols if col[1] == "lb"])
         else:
             raise ValueError(
                 f"Cannot determine feature structure from file {bounds_path}. "
@@ -194,7 +208,9 @@ def plot_bound_evolution(
 
     # Compute scale_max as max absolute midpoint across all features and iterations
     all_mids_concat = np.concatenate(all_mids)
-    scale_max = float(np.max(np.abs(all_mids_concat))) if all_mids_concat.size > 0 else 1.0
+    scale_max = (
+        float(np.max(np.abs(all_mids_concat))) if all_mids_concat.size > 0 else 1.0
+    )
     if scale_max <= 0:
         scale_max = 1.0
 
@@ -257,9 +273,9 @@ def plot_bound_evolution(
             fill_color = line_colors[j].copy()
             fill_color[3] = 0.3  # Set alpha for fill
             ax.fill_between(
-                x_values[j:j+2],
-                lbs[j:j+2],
-                ubs[j:j+2],
+                x_values[j : j + 2],
+                lbs[j : j + 2],
+                ubs[j : j + 2],
                 color=fill_color,
                 linewidth=0,
             )
@@ -281,9 +297,11 @@ def plot_bound_evolution(
 
     # Add threshold marker if found
     if threshold_x is not None:
-        threshold_line = ax.axvline(threshold_x, color='red', linestyle='--', linewidth=2, alpha=0.7)
+        threshold_line = ax.axvline(
+            threshold_x, color="red", linestyle="--", linewidth=2, alpha=0.7
+        )
         legend_handles.append(threshold_line)
-        legend_labels.append('10% threshold')
+        legend_labels.append("10% threshold")
 
     # Calculate y-axis limits: 10 * difference of final bound midpoints
     if all_final_mids:
@@ -312,13 +330,13 @@ def plot_bound_evolution(
 
     # Create legend with custom handles
     if legend_handles:
-        ax.legend(legend_handles, legend_labels, fontsize=9, loc='best')
+        ax.legend(legend_handles, legend_labels, fontsize=9, loc="best")
 
     plt.tight_layout()
 
     # Save or show
     if output_path:
-        plt.savefig(output_path, dpi=dpi, bbox_inches='tight')
+        plt.savefig(output_path, dpi=dpi, bbox_inches="tight")
         print(f"Saved plot to {output_path}")
     else:
         plt.show()
@@ -328,7 +346,7 @@ def plot_bound_evolution(
     # Export data to TSV if requested
     if export_path is not None and export_data:
         export_df = pd.DataFrame(export_data)
-        export_df.to_csv(export_path, sep='\t', index=False)
+        export_df.to_csv(export_path, sep="\t", index=False)
         print(f"Saved plot data to {export_path}")
 
 

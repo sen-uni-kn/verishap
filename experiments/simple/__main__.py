@@ -105,7 +105,9 @@ if __name__ == "__main__":
         case "shap_bab":
             bounds_method = shap_bab
         case "multi_shap_bab":
-            bounds_method = partial(multi_shap_bab, batch_size=1, split_strategy="strong-branching-worse")
+            bounds_method = partial(
+                multi_shap_bab, batch_size=1, split_strategy="strong-branching-worse"
+            )
         case _:
             raise ValueError(f"Unknown bound method: {args.bound_method}")
 

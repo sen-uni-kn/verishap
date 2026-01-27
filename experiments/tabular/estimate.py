@@ -78,6 +78,4 @@ if __name__ == "__main__":
         except TimeoutError:
             print(f"Timeout reached for {n} samples. Stopping experiment.")
         finally:
-            logger.log_stats(
-                "overall", {"runtimes": runtimes}
-            )
+            logger.log_stats("overall", {"runtimes": runtimes})

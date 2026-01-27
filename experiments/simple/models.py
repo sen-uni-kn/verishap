@@ -15,6 +15,7 @@ class SumOut(eqx.Module):
 
 class Linear(eqx.Module):
     """A linear model."""
+
     linear: eqx.nn.Linear
 
     def __init__(self, input_dim, key):

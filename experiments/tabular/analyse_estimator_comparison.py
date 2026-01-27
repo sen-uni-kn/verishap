@@ -1,7 +1,7 @@
 # Copyright 2025 David Boetius
 import argparse
 from pathlib import Path
-from statistics import NormalDist
+from statistics import NormalDist, median
 
 import numpy as np
 import pandas as pd
@@ -10,12 +10,48 @@ import yaml
 from matplotlib import pyplot as plt
 
 
+def _find_bab_repetition_dirs(bab_network_dir: Path) -> list[Path]:
+    """Find repetition directories (e.g., repeatition_1, repeatition_2, etc.)."""
+    if not bab_network_dir.exists():
+        return []
+    # Look for repeatition_* or repetition_* directories
+    rep_dirs = []
+    for pattern in ["repeatition_*", "repetition_*"]:
+        rep_dirs.extend(bab_network_dir.glob(pattern))
+    # Sort by directory name to ensure consistent ordering
+    return sorted(rep_dirs)
+
+
+def _get_bab_file_path(run_dir: Path, network: str, filename: str) -> Path | None:
+    """Get path to a BaB file, handling both old format and repetition format.
+
+    Returns the first repetition's file path if repetitions exist,
+    otherwise returns the direct path if it exists, or None if neither exists.
+    """
+    bab_network_dir = run_dir / "BaB" / network
+    direct_path = bab_network_dir / filename
+
+    # Check if old format (direct file) exists
+    if direct_path.exists():
+        return direct_path
+
+    # Check for repetition directories
+    rep_dirs = _find_bab_repetition_dirs(bab_network_dir)
+    if rep_dirs:
+        # Use the first repetition
+        first_rep_path = rep_dirs[0] / filename
+        if first_rep_path.exists():
+            return first_rep_path
+
+    return None
+
+
 def _load_bab_final_bounds(
     run_dir: Path, network: str
 ) -> tuple[dict[object, tuple[float, float]], dict[object, float], float]:
-    bounds_path = run_dir / "BaB" / network / "multi_shap_bab_bounds.feather"
-    if not bounds_path.exists():
-        raise SystemExit(f"Missing BaB bounds at {bounds_path}")
+    bounds_path = _get_bab_file_path(run_dir, network, "multi_shap_bab_bounds.feather")
+    if bounds_path is None:
+        raise SystemExit(f"Missing BaB bounds for {network}")
     df = pd.read_feather(bounds_path)
     if df.empty:
         raise SystemExit(f"No BaB bounds found in {bounds_path}")
@@ -45,9 +81,9 @@ def _load_bab_final_bounds(
 
 
 def _load_output_scale(run_dir: Path, network: str) -> float:
-    info_path = run_dir / "BaB" / network / "info.yaml"
-    if not info_path.exists():
-        raise SystemExit(f"Missing BaB info.yaml at {info_path}")
+    info_path = _get_bab_file_path(run_dir, network, "info.yaml")
+    if info_path is None:
+        raise SystemExit(f"Missing BaB info.yaml for {network}")
     with info_path.open("r") as handle:
         info = yaml.safe_load(handle)
     model_output = (
@@ -68,21 +104,69 @@ def _load_output_scale(run_dir: Path, network: str) -> float:
 
 
 def _load_bab_status(run_dir: Path, network: str) -> tuple[bool, float | None]:
-    info_path = run_dir / "BaB" / network / "info.yaml"
-    bounds_path = run_dir / "BaB" / network / "multi_shap_bab_bounds.feather"
-    if not info_path.exists() or not bounds_path.exists():
-        return False, None
-    with info_path.open("r") as handle:
-        info = yaml.safe_load(handle)
-    max_iters_reached = info.get("overall", {}).get("max_iters", False)
-    timeout_reached = info.get("overall", {}).get("timeout", False)
-    is_exact = not max_iters_reached and not timeout_reached
-    if not is_exact:
-        return False, None
-    bounds = pd.read_feather(bounds_path)
-    if bounds.empty or "runtime" not in bounds.columns:
-        return False, None
-    return True, float(bounds["runtime"].iloc[-1])
+    bab_network_dir = run_dir / "BaB" / network
+    rep_dirs = _find_bab_repetition_dirs(bab_network_dir)
+
+    # Check if we have repetitions or old format
+    if rep_dirs:
+        # New format with repetitions
+        all_exact = True
+        runtimes = []
+
+        for rep_dir in rep_dirs:
+            info_path = rep_dir / "info.yaml"
+            bounds_path = rep_dir / "multi_shap_bab_bounds.feather"
+
+            if not info_path.exists() or not bounds_path.exists():
+                all_exact = False
+                continue
+
+            with info_path.open("r") as handle:
+                info = yaml.safe_load(handle)
+
+            max_iters_reached = info.get("overall", {}).get("max_iters", False)
+            timeout_reached = info.get("overall", {}).get("timeout", False)
+            is_exact = not max_iters_reached and not timeout_reached
+
+            if not is_exact:
+                all_exact = False
+                continue
+
+            bounds = pd.read_feather(bounds_path)
+            if bounds.empty or "runtime" not in bounds.columns:
+                all_exact = False
+                continue
+
+            runtimes.append(float(bounds["runtime"].iloc[-1]))
+
+        if not all_exact or not runtimes:
+            return False, None
+
+        # Return median runtime across repetitions
+        return True, median(runtimes)
+    else:
+        # Old format without repetitions
+        info_path = bab_network_dir / "info.yaml"
+        bounds_path = bab_network_dir / "multi_shap_bab_bounds.feather"
+
+        if not info_path.exists() or not bounds_path.exists():
+            return False, None
+
+        with info_path.open("r") as handle:
+            info = yaml.safe_load(handle)
+
+        max_iters_reached = info.get("overall", {}).get("max_iters", False)
+        timeout_reached = info.get("overall", {}).get("timeout", False)
+        is_exact = not max_iters_reached and not timeout_reached
+
+        if not is_exact:
+            return False, None
+
+        bounds = pd.read_feather(bounds_path)
+        if bounds.empty or "runtime" not in bounds.columns:
+            return False, None
+
+        return True, float(bounds["runtime"].iloc[-1])
 
 
 def _get_runtime_at(condition: np.ndarray, iter_times: np.ndarray) -> float | None:
@@ -98,31 +182,59 @@ def _load_bab_runtime_thresholds(
     thresholds: list[float],
     output_scale: float,
 ) -> dict[float, float | None]:
-    bounds_path = run_dir / "BaB" / network / "multi_shap_bab_bounds.feather"
-    if not bounds_path.exists():
-        return {}
-    bounds = pd.read_feather(bounds_path)
-    if "runtime" not in bounds.columns:
-        return {}
-    feature_keys = []
-    for feature_key in bounds.columns.get_level_values(0).unique():
-        if (feature_key, "lb") in bounds.columns and (
-            feature_key,
-            "ub",
-        ) in bounds.columns:
-            feature_keys.append(feature_key)
-    if not feature_keys:
-        return {}
-    lbs = np.array([bounds[(key, "lb")] for key in feature_keys]).T
-    ubs = np.array([bounds[(key, "ub")] for key in feature_keys]).T
-    half_width = (ubs - lbs) / 2.0
-    max_norm = (half_width / output_scale).max(axis=1)
-    iter_times = bounds["runtime"].to_numpy()
-    runtimes = {}
-    for threshold in thresholds:
-        fraction = threshold / output_scale
-        runtimes[threshold] = _get_runtime_at(max_norm <= fraction, iter_times)
-    return runtimes
+    bab_network_dir = run_dir / "BaB" / network
+    rep_dirs = _find_bab_repetition_dirs(bab_network_dir)
+
+    # Helper function to compute runtimes for a single bounds file
+    def compute_runtimes_single(bounds_path: Path) -> dict[float, float | None]:
+        if not bounds_path.exists():
+            return {}
+        bounds = pd.read_feather(bounds_path)
+        if "runtime" not in bounds.columns:
+            return {}
+        feature_keys = []
+        for feature_key in bounds.columns.get_level_values(0).unique():
+            if (feature_key, "lb") in bounds.columns and (
+                feature_key,
+                "ub",
+            ) in bounds.columns:
+                feature_keys.append(feature_key)
+        if not feature_keys:
+            return {}
+        lbs = np.array([bounds[(key, "lb")] for key in feature_keys]).T
+        ubs = np.array([bounds[(key, "ub")] for key in feature_keys]).T
+        half_width = (ubs - lbs) / 2.0
+        max_norm = (half_width / output_scale).max(axis=1)
+        iter_times = bounds["runtime"].to_numpy()
+        runtimes = {}
+        for threshold in thresholds:
+            fraction = threshold / output_scale
+            runtimes[threshold] = _get_runtime_at(max_norm <= fraction, iter_times)
+        return runtimes
+
+    if rep_dirs:
+        # New format with repetitions - compute median runtime across repetitions
+        all_runtimes = {threshold: [] for threshold in thresholds}
+
+        for rep_dir in rep_dirs:
+            bounds_path = rep_dir / "multi_shap_bab_bounds.feather"
+            rep_runtimes = compute_runtimes_single(bounds_path)
+            for threshold, runtime in rep_runtimes.items():
+                if runtime is not None:
+                    all_runtimes[threshold].append(runtime)
+
+        # Compute median for each threshold
+        result = {}
+        for threshold in thresholds:
+            if all_runtimes[threshold]:
+                result[threshold] = median(all_runtimes[threshold])
+            else:
+                result[threshold] = None
+        return result
+    else:
+        # Old format without repetitions
+        bounds_path = bab_network_dir / "multi_shap_bab_bounds.feather"
+        return compute_runtimes_single(bounds_path)
 
 
 def _compute_output_ticks(output_scale: float, max_error: float) -> list[float]:
@@ -197,6 +309,7 @@ def _compute_aggregated_error(
     true_vals = np.array([true_values[col] for col in feature_cols])
     use_bounds = np.isnan(true_vals).any()
     if use_bounds:
+        print("Using bounds for error calculation.")
         lower = np.array([bounds[col][0] for col in feature_cols])
         upper = np.array([bounds[col][1] for col in feature_cols])
         # Optimistic error calculation
@@ -210,7 +323,7 @@ def _compute_aggregated_error(
     if agg_mode == "l1":
         return pd.Series(errors.mean(axis=1), index=df.index)
     if agg_mode == "l2":
-        return pd.Series(np.sqrt(np.square(errors).mean(axis=1)), index=df.index)
+        return pd.Series(np.square(errors).mean(axis=1), index=df.index)
     if agg_mode == "linf":
         return pd.Series(errors.max(axis=1), index=df.index)
     raise ValueError(f"Unknown aggregation mode: {agg_mode}")
@@ -243,8 +356,33 @@ def _load_sampling_errors(
             sub["estimator"] = estimator
             records.append(sub)
         else:
-            num_samples = int(stats_path.parent.name)
-            seed = stats_path.parents[1].name
+            # Extract num_samples and seed from path
+            # Handle both old format (estimator/network/seed/num_samples/) and
+            # new format with repetitions (estimator/network/repetition/seed/num_samples/)
+            parent = stats_path.parent
+            num_samples = int(parent.name)
+
+            # Walk up the path to find seed
+            seed = None
+            for p in stats_path.parents:
+                # Skip the parent (num_samples directory)
+                if p == parent:
+                    continue
+                # Stop at the network directory
+                if p == sampling_root:
+                    break
+                # Check if this looks like a seed directory (not a repetition directory)
+                if not (
+                    p.name.startswith("repeatition_")
+                    or p.name.startswith("repetition_")
+                ):
+                    seed = p.name
+                    break
+
+            if seed is None:
+                # Fallback to old behavior
+                seed = stats_path.parents[1].name
+
             sub = pd.DataFrame({"error": errors})
             sub["num_samples"] = num_samples
             sub["seed"] = seed
@@ -365,7 +503,9 @@ def _merge_highlight_columns(
 ) -> pd.DataFrame:
     if highlight_vals.empty:
         return data
-    pivot = highlight_vals.pivot(index="num_samples", columns="estimator", values="error")
+    pivot = highlight_vals.pivot(
+        index="num_samples", columns="estimator", values="error"
+    )
     pivot = pivot.rename(columns=lambda est: f"{est}_highlight_error")
     pivot = pivot.reset_index()
     return data.merge(pivot, on="num_samples", how="left")
@@ -410,7 +550,9 @@ def _plot_error_summary(
     y_axis_scale: str,
     area_mode: str,
     area_alpha: float | None,
+    x_max: float | None = None,
     title: str | None = None,
+    estimators_only: bool = False,
 ) -> None:
     estimator_order = list(error_summary["estimator"].unique())
     estimator_colors = dict(
@@ -418,7 +560,9 @@ def _plot_error_summary(
     )
     if area_mode != "none":
         area_label = (
-            "range" if area_mode == "range" or area_alpha is None else f"CI α={area_alpha:g}"
+            "range"
+            if area_mode == "range" or area_alpha is None
+            else f"CI α={area_alpha:g}"
         )
         for estimator, group in error_summary.groupby("estimator"):
             group = group.sort_values("num_samples")
@@ -448,7 +592,15 @@ def _plot_error_summary(
             )
     ax.set_xscale("log")
     ax.set_yscale("log" if y_axis_scale == "log" else "linear")
-    if ticks:
+    if x_max is not None:
+        # Get current x limits to preserve the minimum
+        x_min_current, _ = ax.get_xlim()
+        ax.set_xlim(x_min_current, x_max)
+    if estimators_only:
+        # When estimators_only is True, scale y-axis to the data range
+        if not np.isnan(y_min) and not np.isnan(y_max):
+            ax.set_ylim(y_min, y_max)
+    elif ticks:
         ticks_sorted = list(ticks)
         if exact_tick is not None:
             ticks_sorted.append(exact_tick)
@@ -514,12 +666,36 @@ def _plot_network(
     area_alpha: float | None,
     ci_multiplier: float | None,
     dump_data: bool,
+    x_max_spec: str | None = None,
+    estimators_only: bool = False,
 ) -> plt.Figure | None:
     bounds, true_values, last_bound_half_width = _load_bab_final_bounds(
         run_dir, network
     )
     output_scale = _load_output_scale(run_dir, network)
     is_exact, exact_runtime = _load_bab_status(run_dir, network)
+
+    # Parse x_max specification
+    x_max = None
+    if x_max_spec is not None:
+        if x_max_spec.endswith("n"):
+            # Format: "NUMBERn" means NUMBER * num_features
+            try:
+                multiplier = float(x_max_spec[:-1])
+                num_features = len(bounds)
+                x_max = multiplier * num_features
+            except ValueError as exc:
+                raise SystemExit(
+                    f"Invalid --xmax format: {x_max_spec}. Expected number or 'NUMBERn'."
+                ) from exc
+        else:
+            # Direct numerical value
+            try:
+                x_max = float(x_max_spec)
+            except ValueError as exc:
+                raise SystemExit(
+                    f"Invalid --xmax value: {x_max_spec}. Expected number or 'NUMBERn'."
+                ) from exc
     runs_list = []
     for estimator in estimators:
         runs = _load_sampling_errors(
@@ -556,17 +732,33 @@ def _plot_network(
         run_dir, network, ticks, output_scale
     )
     exact_tick = output_scale * 1e-6 if is_exact else None
-    y_min = min(ticks)
-    if exact_tick is not None:
-        y_min = min(y_min, exact_tick)
-    if not is_exact and last_bound_half_width > 0:
-        y_min = min(y_min, last_bound_half_width)
-    y_min = max(y_min, 1e-12)
-    y_max = max(max_error, max(ticks))
-    if exact_tick is not None:
-        y_max = max(y_max, exact_tick)
-    if not is_exact and last_bound_half_width > 0:
-        y_max = max(y_max, last_bound_half_width)
+    if estimators_only:
+        # Scale y-axis to the actual error range
+        min_error = float(summary["min_error"].min())
+        if not highlight_vals.empty:
+            min_error = min(min_error, float(highlight_vals["error"].min()))
+            max_error = max(max_error, float(highlight_vals["error"].max()))
+        # Add some padding for better visualization
+        if y_axis_scale == "log":
+            y_min = min_error * 0.8
+            y_max = max_error * 1.2
+        else:
+            margin = (max_error - min_error) * 0.1
+            y_min = min_error - margin
+            y_max = max_error + margin
+        y_min = max(y_min, 1e-12)
+    else:
+        y_min = min(ticks)
+        if exact_tick is not None:
+            y_min = min(y_min, exact_tick)
+        if not is_exact and last_bound_half_width > 0:
+            y_min = min(y_min, last_bound_half_width)
+        y_min = max(y_min, 1e-12)
+        y_max = max(max_error, max(ticks))
+        if exact_tick is not None:
+            y_max = max(y_max, exact_tick)
+        if not is_exact and last_bound_half_width > 0:
+            y_max = max(y_max, last_bound_half_width)
     out_csv = _resolve_out_path(run_dir, out_name, network, multi_networks)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     if not summary.empty:
@@ -590,7 +782,9 @@ def _plot_network(
         y_axis_scale,
         area_mode,
         area_alpha,
+        x_max=x_max,
         title=f"Sampling error for {network}",
+        estimators_only=estimators_only,
     )
     fig.tight_layout()
     return fig
@@ -610,6 +804,8 @@ def main(
     area_alpha: float | None,
     ci_multiplier: float | None,
     dump_data: bool,
+    x_max_spec: str | None = None,
+    estimators_only: bool = False,
 ) -> None:
     if sampling_estimators is None or any(
         estimator.lower() == "all" for estimator in sampling_estimators
@@ -641,6 +837,8 @@ def main(
             area_alpha,
             ci_multiplier,
             dump_data,
+            x_max_spec=x_max_spec,
+            estimators_only=estimators_only,
         )
         if fig is not None:
             figures.append(fig)
@@ -722,6 +920,16 @@ if __name__ == "__main__":
             "containing the plotted data (highlight where available, otherwise summary)."
         ),
     )
+    parser.add_argument(
+        "--xmax",
+        type=str,
+        default=None,
+        help=(
+            "Maximum value for the x-axis (number of samples). Can be a direct number "
+            "(e.g., '1000') or 'NUMBERn' format (e.g., '64n') where NUMBER is multiplied "
+            "by the number of features. For example, '64n' with 12 features sets xmax to 768."
+        ),
+    )
     args = parser.parse_args()
     networks_arg = args.networks
     all_networks = networks_arg.lower() == "all"
@@ -741,4 +949,6 @@ if __name__ == "__main__":
         area_alpha,
         ci_multiplier,
         args.dump_data,
+        x_max_spec=args.xmax,
+        estimators_only=args.estimators_only,
     )

@@ -3,13 +3,12 @@ from pathlib import Path
 from typing import Iterable
 
 import colour
-import jax
-import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import skimage.color
 from matplotlib import colormaps, colors
 from matplotlib import pyplot as plt
+from skimage.segmentation import find_boundaries
 from tqdm import tqdm
 
 from shap_bounds.logger import Logger
@@ -24,23 +23,25 @@ def adapt_luminance(color, luminance_multiplier):
     return np.concatenate([color_rgb, color[..., 3:]], axis=-1)
 
 
-class VisionPatchesBoundsLogger(Logger):
+class SuperpixelsBoundsLogger(Logger):
     def __init__(
         self,
         sample: np.ndarray,
-        num_patches: tuple[int, int, int],
+        masks: np.ndarray,
         output_dir: Path,
         feature: int | None = None,
         show: bool = True,
-        base_alpha: float = 0.7,
+        base_alpha: float = 0.5,
         dpi: int = 150,
+        scale_factor: int = 1,
         midpoint_scale_max_abs: float | None = None,
         range_scale_max_abs: float | None = None,
         separate_colorbar: bool = False,
         more_space: bool = False,
     ):
         self.sample = np.asarray(sample)
-        self.num_patches = num_patches
+        self.masks = np.asarray(masks)
+        self.num_features = masks.shape[0]
         self.feature = feature
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -49,10 +50,10 @@ class VisionPatchesBoundsLogger(Logger):
         self.show = show
         self.base_alpha = base_alpha
         self.dpi = dpi
+        self.scale_factor = max(int(scale_factor), 1)
         self._pad_inches = 0.15 if more_space else 0.0
 
         self.mask_idx = self._make_mask_idx()
-        # self.cmap = self._load_colormap("vik").reversed()
         self.cmap = self._load_colormap("roma")
         self.mid_cmap = self.cmap
         self.fig = None
@@ -97,11 +98,21 @@ class VisionPatchesBoundsLogger(Logger):
             return getattr(cmc, name)
 
     def _make_mask_idx(self) -> np.ndarray:
+        """Create an index map where each pixel is labeled by its superpixel ID."""
         channels, height, width = self.sample.shape
-        total_patches = int(np.prod(self.num_patches))
-        mask_idx = jnp.arange(total_patches, dtype=jnp.int32).reshape(self.num_patches)
-        mask_idx = jax.image.resize(mask_idx, (channels, height, width), "nearest")
-        return np.asarray(mask_idx, dtype=np.int32)
+        mask_idx = np.zeros((height, width), dtype=np.int32)
+
+        # For each superpixel, mark all its pixels with its index
+        for i in range(self.num_features):
+            # masks has shape (num_features, 1, height, width)
+            mask = self.masks[i, 0]  # Get the 2D mask for this superpixel
+            mask_idx[mask > 0] = i
+
+        if self.scale_factor > 1:
+            mask_idx = np.repeat(mask_idx, self.scale_factor, axis=0)
+            mask_idx = np.repeat(mask_idx, self.scale_factor, axis=1)
+
+        return mask_idx
 
     def _ensure_figure(self):
         if self.fig is not None:
@@ -122,6 +133,7 @@ class VisionPatchesBoundsLogger(Logger):
         )
         self.combined_colorbar_ax = self.fig.add_subplot(right[:5, 0])
         base_image = self._base_image()
+        # Always use grayscale colormap since _base_image() converts to grayscale
         self.base_artist = self.ax.imshow(base_image, cmap="gray", vmin=0, vmax=1)
         overlay = np.zeros((*base_image.shape[:2], 4), dtype=np.float32)
         self.overlay_artist = self.ax.imshow(overlay)
@@ -141,7 +153,25 @@ class VisionPatchesBoundsLogger(Logger):
         # Convert to grayscale if multi-channel
         if base.ndim == 3 and base.shape[-1] > 1:
             base = skimage.color.rgb2gray(base)
-        return base
+        if self.scale_factor > 1:
+            if base.ndim == 2:
+                base = np.repeat(base, self.scale_factor, axis=0)
+                base = np.repeat(base, self.scale_factor, axis=1)
+            else:
+                base = np.repeat(base, self.scale_factor, axis=0)
+                base = np.repeat(base, self.scale_factor, axis=1)
+        return self._add_superpixel_borders(base)
+
+    def _add_superpixel_borders(self, base: np.ndarray) -> np.ndarray:
+        boundaries = find_boundaries(self.mask_idx, mode="inner")
+        if not np.any(boundaries):
+            return base
+        bordered = np.array(base, copy=True)
+        if bordered.ndim == 2:
+            bordered[boundaries] = 1.0
+        else:
+            bordered[boundaries, :] = 1.0
+        return bordered
 
     def _init_colorbars(self):
         self.mid_norm = colors.Normalize(vmin=-1.0, vmax=1.0)
@@ -159,10 +189,9 @@ class VisionPatchesBoundsLogger(Logger):
         mid = np.asarray((lbs + ubs) / 2).reshape(-1)
         ran = np.asarray((ubs - lbs) / 2).reshape(-1)
 
-        total_patches = int(np.prod(self.num_patches))
-        if mid.size == 1 and self.feature is not None and total_patches > 1:
-            mid_full = np.zeros(total_patches, dtype=mid.dtype)
-            ran_full = np.zeros(total_patches, dtype=ran.dtype)
+        if mid.size == 1 and self.feature is not None and self.num_features > 1:
+            mid_full = np.zeros(self.num_features, dtype=mid.dtype)
+            ran_full = np.zeros(self.num_features, dtype=ran.dtype)
             mid_full[self.feature] = mid.item()
             ran_full[self.feature] = ran.item()
             mid, ran = mid_full, ran_full
@@ -179,12 +208,9 @@ class VisionPatchesBoundsLogger(Logger):
             intensity = np.zeros_like(mid, dtype=np.float32)
             scale_max = 1.0
 
+        # Map superpixel values to pixel values using the mask index
         mid_map = mid[self.mask_idx]
         intensity_map = intensity[self.mask_idx]
-
-        if mid_map.ndim == 3:
-            mid_map = mid_map.mean(axis=0)
-            intensity_map = intensity_map.mean(axis=0)
 
         self._update_mid_colorbar(max_abs_mid)
         mid_colors = self.mid_cmap(self.mid_norm(mid_map))
@@ -234,7 +260,6 @@ class VisionPatchesBoundsLogger(Logger):
         mid_colors = np.tile(mid_colors[:, None, :3], (1, size, 1))
         intensity = np.tile(intensity[None, :], (size, 1))
         rgb = adapt_luminance(mid_colors, intensity)
-        # rgb = mid_colors[:, None, :3] * intensity[None, :, None]
         alpha = np.ones((size, size, 1), dtype=rgb.dtype)
         image = np.concatenate([rgb, alpha], axis=-1)
         self.combined_colorbar_image.set_data(image)
@@ -357,11 +382,18 @@ def _iter_bounds(
         yield lb, ub
 
 
+def _infer_num_features(bounds: tuple[np.ndarray, np.ndarray]) -> int:
+    lbs, _ = bounds
+    if lbs.ndim <= 1:
+        return 1
+    return int(lbs.shape[1])
+
+
 if __name__ == "__main__":
-    from .argument_parser import VisionPatchesCmdArgs
+    from .argument_parser import SuperpixelsCmdArgs
 
     cmd_args = (
-        VisionPatchesCmdArgs()
+        SuperpixelsCmdArgs()
         .model_args()
         .dataset_args()
         .segmentation_args()
@@ -382,6 +414,12 @@ if __name__ == "__main__":
     )
     cmd_args.parser.add_argument("--no-show", action="store_true")
     cmd_args.parser.add_argument("--dpi", type=int, default=150)
+    cmd_args.parser.add_argument(
+        "--scale",
+        type=int,
+        default=1,
+        help="Scale factor for the base image and masks when rendering overlays.",
+    )
     cmd_args.parser.add_argument(
         "--separate-colormap",
         action="store_true",
@@ -415,25 +453,29 @@ if __name__ == "__main__":
     bounds_path = args.args.bounds
     bounds_df = pd.read_feather(bounds_path)
     lb_array, ub_array = _bounds_from_frame(bounds_df)
+    inferred_num_features = _infer_num_features((lb_array, ub_array))
+    if args.args.num_features != inferred_num_features:
+        args.args.num_features = inferred_num_features
     mids = (lb_array + ub_array) / 2
     mid_final = (lb_array[-1] + ub_array[-1]) / 2
     if args.args.midscale_use_final:
-        mid_scale = float(np.max(np.abs(mid_final))) * 1.1
+        mid_scale = float(np.max(np.abs(mid_final))) * 1.5
     else:
         mid_scale = float(np.max(np.abs(mids))) * 1.0
     range_scale = float(np.max(np.abs(mid_final)))
 
     sample = args.sample
-    num_patches = args.num_patches[0]
+    masks = args.masks
     out_dir = args.args.out or bounds_path.parent / "replay"
 
-    logger = VisionPatchesBoundsLogger(
+    logger = SuperpixelsBoundsLogger(
         sample,
-        num_patches,
+        masks,
         out_dir,
         feature=args.feature,
         show=not args.args.no_show,
         dpi=args.args.dpi,
+        scale_factor=args.args.scale,
         midpoint_scale_max_abs=mid_scale,
         range_scale_max_abs=range_scale,
         separate_colorbar=args.args.separate_colormap,

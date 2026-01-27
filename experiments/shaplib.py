@@ -29,7 +29,9 @@ def superfeature_masker(
     in_dims = tuple(range(-in_ndim, 0))
     sample: Real[Array, " 1 *n"] = jnp.expand_dims(sample, axis=0)
 
-    def masker(mask: Bool[Array, " b sf"], x: Real[Array, " sf"]) -> Real[Array, " b d *n"]:
+    def masker(
+        mask: Bool[Array, " b sf"], x: Real[Array, " sf"]
+    ) -> Real[Array, " b d *n"]:
         # mask batch dimension is optional
         n_batch = len(mask.shape) - 1
         sf_mask: Bool[Array, " b sf *n"] = (
@@ -49,7 +51,9 @@ def _preprocess_array(x: Real[Array, " *n"]) -> Real[Array, " d *n"]:
     return x
 
 
-def _preprocess_masker(masker: Callable | Real[Array, " *n"] | Real[Array, " d *n"]) -> Real[Array, " d *n"]:
+def _preprocess_masker(
+    masker: Callable | Real[Array, " *n"] | Real[Array, " d *n"],
+) -> Real[Array, " d *n"]:
     if not isinstance(masker, Callable):
         masker = _preprocess_array(masker)
     return masker

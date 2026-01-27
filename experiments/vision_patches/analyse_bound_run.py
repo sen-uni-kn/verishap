@@ -87,12 +87,8 @@ def _load_run_stats(run_dir: Path) -> dict:
     max_norm1_ran_lt_10percent_iter = _get_iteration_at(max_norm_ranges <= 0.1)
     max_norm1_ran_lt_1percent = _get_runtime_at(max_norm_ranges <= 0.01, iter_times)
     max_norm1_ran_lt_1percent_iter = _get_iteration_at(max_norm_ranges <= 0.01)
-    max_norm1_ran_lt_1permille = _get_runtime_at(
-        max_norm_ranges <= 0.001, iter_times
-    )
-    max_norm1_ran_lt_1permille_iter = _get_iteration_at(
-        max_norm_ranges <= 0.001
-    )
+    max_norm1_ran_lt_1permille = _get_runtime_at(max_norm_ranges <= 0.001, iter_times)
+    max_norm1_ran_lt_1permille_iter = _get_iteration_at(max_norm_ranges <= 0.001)
 
     ref_vals2 = np.max(np.abs((lbs + ubs) / 2), axis=-1)
     ranges_norm = ((ubs - lbs) / 2) / ref_vals2.reshape(-1, 1)
@@ -101,12 +97,8 @@ def _load_run_stats(run_dir: Path) -> dict:
     max_norm2_ran_lt_10percent_iter = _get_iteration_at(max_norm_ranges <= 0.1)
     max_norm2_ran_lt_1percent = _get_runtime_at(max_norm_ranges <= 0.01, iter_times)
     max_norm2_ran_lt_1percent_iter = _get_iteration_at(max_norm_ranges <= 0.01)
-    max_norm2_ran_lt_1permille = _get_runtime_at(
-        max_norm_ranges <= 0.001, iter_times
-    )
-    max_norm2_ran_lt_1permille_iter = _get_iteration_at(
-        max_norm_ranges <= 0.001
-    )
+    max_norm2_ran_lt_1permille = _get_runtime_at(max_norm_ranges <= 0.001, iter_times)
+    max_norm2_ran_lt_1permille_iter = _get_iteration_at(max_norm_ranges <= 0.001)
 
     exact_bounds = None
     if not max_iters_reached and not timeout_reached:

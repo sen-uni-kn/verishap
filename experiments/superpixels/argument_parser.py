@@ -29,6 +29,15 @@ class SuperpixelsCmdArgs(CmdArgs):
         )
         return self
 
+    def logger_args(self) -> "SuperpixelsCmdArgs":
+        super().logger_args()
+        self.parser.add_argument(
+            "--overlay-logger",
+            action="store_true",
+            help="Enable overlay logging for superpixels bounds.",
+        )
+        return self
+
     # =========================================================================
 
     @property
@@ -47,6 +56,9 @@ class SuperpixelsCmdArgs(CmdArgs):
         if self.dataset.lower() == "cifar10":
             resources_dir = Path(__file__).parent / "resources"
             return resources_dir / "cifar10_superpixels_100"
+        elif self.dataset.lower() == "gtsrb":
+            resources_dir = Path(__file__).parent / "resources"
+            return resources_dir / "gtsrb_superpixels_100"
         else:
             raise ValueError(f"Unknown dataset: {self.dataset}")
 
@@ -79,6 +91,10 @@ class SuperpixelsCmdArgs(CmdArgs):
             return jnp.ones(num_features, dtype=jnp.float32)
         else:
             return jnp.ones_like(self.sample)
+
+    @property
+    def overlay_logger(self) -> bool:
+        return self.args.overlay_logger
 
     def out_file(self, local_output_dir: Path) -> Path:
         if self.args.out_file is None:

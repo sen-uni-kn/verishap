@@ -7,6 +7,7 @@ from shap_bounds.logger import ConsoleLogger, FileLogger, JoinLoggers
 
 from .. import runstats
 from .argument_parser import SuperpixelsCmdArgs
+from .overlay_logger import SuperpixelsBoundsLogger
 
 local_resoure_dir = Path(__file__).parent / "resources"
 local_output_dir = Path(__file__).parent / "output"
@@ -32,9 +33,20 @@ if __name__ == "__main__":
     stats = {"timeout": False, "max_iters": False}
 
     out_dir = args.out_dir(local_output_dir)
+    overlay_logger = None
+    if args.overlay_logger:
+        overlay_logger = SuperpixelsBoundsLogger(
+            args.sample,
+            args.masks,
+            out_dir,
+            feature=in_feature,
+            show=not args.silent,
+        )
 
     with FileLogger(out_dir) as file_logger:
         logger_parts = [*loggers, file_logger]
+        if overlay_logger is not None:
+            logger_parts.append(overlay_logger)
         logger = JoinLoggers(*logger_parts)
         logger.log_config("run_details", runstats.machine_and_code_details())
         logger.log_config("cmd_args", args.all_arguments)

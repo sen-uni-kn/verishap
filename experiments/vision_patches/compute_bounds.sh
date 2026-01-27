@@ -5,6 +5,8 @@ MNIST_OUTPUT="${2-4}"
 SHAP_VARIANT="${3-mean-baseline}"
 BATCH_SIZE="${4-4096}"
 NETWORK="${5-experiments/resources/mnist-cnn.eqx}"
+MIN_PATCHES="${6-5}"
+MAX_PATCHES="${7-7}"
 network_filename=$(basename "$NETWORK")
 network_name="${network_filename%.*}"
 
@@ -18,7 +20,7 @@ then
 fi
 EXPERIMENT_DIR="$HERE/output/${network_name}_${SHAP_VARIANT}_${TIMESTAMP}"
 
-for num_patches in $(seq 5 7); do
+for num_patches in $(seq ${MIN_PATCHES} ${MAX_PATCHES}); do
   printf "\n\nRunning Warmup for Branch and Bound for ${num_patches} patches...\n"
 
   OUT_DIR="${EXPERIMENT_DIR}/warmup/BaB/${num_patches}_patches"

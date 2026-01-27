@@ -5,11 +5,11 @@ import random
 from pathlib import Path
 
 import numpy as np
+import torchvision
 from skimage.color import rgb2gray
 from skimage.filters import sobel
 from skimage.segmentation import slic, watershed
 from skimage.util import img_as_float
-from torchvision.datasets import CIFAR10
 from tqdm import tqdm
 
 
@@ -37,9 +37,26 @@ if __name__ == "__main__":
     parser.add_argument("--min-segments", type=int, default=1)
     parser.add_argument("--max-segments", type=int, default=100)
     parser.add_argument("--step-segments", type=int, default=1)
+    parser.add_argument("--dataset", type=str, default="cifar10")
     args = parser.parse_args()
 
-    dataset = CIFAR10(root=".datasets", train=False, download=True)
+    if args.dataset == "cifar10":
+        dataset = torchvision.datasets.CIFAR10(
+            root=".datasets", train=False, download=True
+        )
+    elif args.dataset == "gtsrb":
+        dataset = torchvision.datasets.GTSRB(
+            ".datasets",
+            split="test",
+            download=True,
+            transform=torchvision.transforms.Compose(
+                [
+                    torchvision.transforms.Resize((32, 32)),
+                ]
+            ),
+        )
+    else:
+        raise ValueError(f"Unknown dataset: {args.dataset}")
 
     to_calculate = list(
         range(args.min_segments, args.max_segments + 1, args.step_segments)
@@ -96,7 +113,7 @@ if __name__ == "__main__":
 
     out_name = args.out_name
     if out_name is None:
-        out_name = f"cifar10_superpixels_{num_imgs}"
+        out_name = f"{args.dataset}_superpixels_{num_imgs}"
     output_dir = Path(__file__).parent / "resources" / out_name
     output_dir.mkdir(parents=True, exist_ok=False)
 
