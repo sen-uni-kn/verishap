@@ -6,7 +6,6 @@ Analyzes how runtime and bound quality scale with network size (width × depth).
 
 import argparse
 import re
-from collections import defaultdict
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -26,6 +25,32 @@ def _parse_network_size(network_name: str) -> tuple[int | None, int | None]:
         depth = int(match.group(2))
         return width, depth
     return None, None
+
+
+def _compute_num_params(
+    num_features: int, width: int | None, depth: int | None, output_dim: int = 1
+) -> int | None:
+    """Compute number of parameters for an MLP.
+
+    Architecture: input -> [hidden layers] -> output
+    - First hidden layer: num_features * width + width (weights + biases)
+    - Additional hidden layers: (depth-1) * (width * width + width)
+    - Output layer: width * output_dim + output_dim
+    """
+    if width is None or depth is None or num_features is None:
+        return None
+
+    # First hidden layer
+    params = num_features * width + width
+
+    # Additional hidden layers (depth - 1 more)
+    if depth > 1:
+        params += (depth - 1) * (width * width + width)
+
+    # Output layer
+    params += width * output_dim + output_dim
+
+    return params
 
 
 def _get_runtime_at(condition: np.ndarray, iter_times: np.ndarray) -> float | None:
@@ -153,6 +178,10 @@ def _iter_runs(data_dir: Path) -> Iterable[dict]:
         run = _load_run(info_path)
         if run is not None:
             run.update(path_info)
+            # Compute number of parameters from network architecture
+            run["num_params"] = _compute_num_params(
+                run["num_features"], run["width"], run["depth"]
+            )
             yield run
 
 
@@ -177,6 +206,7 @@ def _load_data_dir(data_dir: Path) -> pd.DataFrame:
             "num_features": "first",
             "width": "first",
             "depth": "first",
+            "num_params": "first",
             "success": "all",  # All repetitions must succeed
             "time_to_10pct": "median",
             "time_to_1pct": "median",
@@ -206,7 +236,13 @@ def _format_table(df: pd.DataFrame, columns: list[str], headers: list[str]) -> s
     col_widths = []
     for col in df_display.columns:
         header_width = len(str(col))
-        data_width = df_display[col].astype(str).str.len().max()
+        # For #Params, calculate width based on comma-formatted numbers
+        if col == "#Params":
+            data_width = df_display[col].apply(
+                lambda x: len(f"{int(x):,}") if pd.notna(x) else 2
+            ).max()
+        else:
+            data_width = df_display[col].astype(str).str.len().max()
         col_widths.append(max(header_width, data_width))
 
     # Build header
@@ -226,6 +262,8 @@ def _format_table(df: pd.DataFrame, columns: list[str], headers: list[str]) -> s
                 # Use integer formatting for Width/Depth/Iterations columns
                 if col_name in ["Width", "Depth", "Iterations"]:
                     row_parts.append(f"{int(val)}".rjust(width))
+                elif col_name == "#Params":
+                    row_parts.append(f"{int(val):,}".rjust(width))
                 else:
                     row_parts.append(f"{val:.2f}".rjust(width))
             else:
@@ -264,6 +302,7 @@ def main(data_dirs: Sequence[Path], quiet: bool = False, latex: bool = False) ->
                     "num_features": "first",
                     "width": "first",
                     "depth": "first",
+                    "num_params": "first",
                     "success": "all",
                     "time_to_10pct": "median",
                     "time_to_1pct": "median",
@@ -311,15 +350,18 @@ def main(data_dirs: Sequence[Path], quiet: bool = False, latex: bool = False) ->
 
         if latex:
             print("% Width Scaling Results (depth=1)")
-            print(r"\begin{tabular}{rrrrr}")
+            print(r"\begin{tabular}{rrrrrr}")
             print(r"\toprule")
             print(
-                r"\textbf{Width} & \textbf{Runtime (s)} & \textbf{Iterations} & "
+                r"\textbf{Width} & \textbf{\#Params} & \textbf{Runtime (s)} & \textbf{Iterations} & "
                 r"\textbf{Time to 10\%} & \textbf{Final \%} \\"
             )
             print(r"\midrule")
             for _, row in depth_1_display.iterrows():
                 width = int(row["width"])
+                num_params = (
+                    f"{int(row['num_params']):,}" if pd.notna(row["num_params"]) else "--"
+                )
                 runtime = f"{row['runtime']:.2f}" if pd.notna(row["runtime"]) else "--"
                 iterations = (
                     f"{int(row['iterations'])}" if pd.notna(row["iterations"]) else "--"
@@ -335,7 +377,7 @@ def main(data_dirs: Sequence[Path], quiet: bool = False, latex: bool = False) ->
                     else "--"
                 )
                 print(
-                    f"{width} & {runtime} & {iterations} & {time_10} & {final_pct} \\\\"
+                    f"{width} & {num_params} & {runtime} & {iterations} & {time_10} & {final_pct} \\\\"
                 )
             print(r"\bottomrule")
             print(r"\end{tabular}")
@@ -345,12 +387,13 @@ def main(data_dirs: Sequence[Path], quiet: bool = False, latex: bool = False) ->
                     depth_1_display,
                     [
                         "width",
+                        "num_params",
                         "runtime",
                         "iterations",
                         "time_to_10pct",
                         "final_bounds_pct",
                     ],
-                    ["Width", "Runtime (s)", "Iterations", "Time to 10%", "Final %"],
+                    ["Width", "#Params", "Runtime (s)", "Iterations", "Time to 10%", "Final %"],
                 )
             )
         print()
@@ -367,15 +410,18 @@ def main(data_dirs: Sequence[Path], quiet: bool = False, latex: bool = False) ->
 
         if latex:
             print("% Depth Scaling Results (width=1024)")
-            print(r"\begin{tabular}{rrrrr}")
+            print(r"\begin{tabular}{rrrrrr}")
             print(r"\toprule")
             print(
-                r"\textbf{Depth} & \textbf{Runtime (s)} & \textbf{Iterations} & "
+                r"\textbf{Depth} & \textbf{\#Params} & \textbf{Runtime (s)} & \textbf{Iterations} & "
                 r"\textbf{Time to 10\%} & \textbf{Final \%} \\"
             )
             print(r"\midrule")
             for _, row in depth_varying_display.iterrows():
                 depth = int(row["depth"])
+                num_params = (
+                    f"{int(row['num_params']):,}" if pd.notna(row["num_params"]) else "--"
+                )
                 runtime = f"{row['runtime']:.2f}" if pd.notna(row["runtime"]) else "--"
                 iterations = (
                     f"{int(row['iterations'])}" if pd.notna(row["iterations"]) else "--"
@@ -391,7 +437,7 @@ def main(data_dirs: Sequence[Path], quiet: bool = False, latex: bool = False) ->
                     else "--"
                 )
                 print(
-                    f"{depth} & {runtime} & {iterations} & {time_10} & {final_pct} \\\\"
+                    f"{depth} & {num_params} & {runtime} & {iterations} & {time_10} & {final_pct} \\\\"
                 )
             print(r"\bottomrule")
             print(r"\end{tabular}")
@@ -401,12 +447,13 @@ def main(data_dirs: Sequence[Path], quiet: bool = False, latex: bool = False) ->
                     depth_varying_display,
                     [
                         "depth",
+                        "num_params",
                         "runtime",
                         "iterations",
                         "time_to_10pct",
                         "final_bounds_pct",
                     ],
-                    ["Depth", "Runtime (s)", "Iterations", "Time to 10%", "Final %"],
+                    ["Depth", "#Params", "Runtime (s)", "Iterations", "Time to 10%", "Final %"],
                 )
             )
         print()
@@ -421,10 +468,10 @@ def main(data_dirs: Sequence[Path], quiet: bool = False, latex: bool = False) ->
 
     if latex:
         print("% Full Network Size Results")
-        print(r"\begin{tabular}{lrrrrrrr}")
+        print(r"\begin{tabular}{lrrrrrrrr}")
         print(r"\toprule")
         print(
-            r"\textbf{Network} & \textbf{Width} & \textbf{Depth} & \textbf{Runtime (s)} & "
+            r"\textbf{Network} & \textbf{Width} & \textbf{Depth} & \textbf{\#Params} & \textbf{Runtime (s)} & "
             r"\textbf{Iterations} & \textbf{Time to 10\%} & \textbf{Time to 1\%} & \textbf{Final \%} \\"
         )
         print(r"\midrule")
@@ -432,6 +479,9 @@ def main(data_dirs: Sequence[Path], quiet: bool = False, latex: bool = False) ->
             network = row["network"]
             width = int(row["width"]) if pd.notna(row["width"]) else "--"
             depth = int(row["depth"]) if pd.notna(row["depth"]) else "--"
+            num_params = (
+                f"{int(row['num_params']):,}" if pd.notna(row["num_params"]) else "--"
+            )
             runtime = f"{row['runtime']:.2f}" if pd.notna(row["runtime"]) else "--"
             iterations = (
                 f"{int(row['iterations'])}" if pd.notna(row["iterations"]) else "--"
@@ -450,7 +500,7 @@ def main(data_dirs: Sequence[Path], quiet: bool = False, latex: bool = False) ->
                 else "--"
             )
             print(
-                f"{network} & {width} & {depth} & {runtime} & {iterations} & "
+                f"{network} & {width} & {depth} & {num_params} & {runtime} & {iterations} & "
                 f"{time_10} & {time_1} & {final_pct} \\\\"
             )
         print(r"\bottomrule")
@@ -463,6 +513,7 @@ def main(data_dirs: Sequence[Path], quiet: bool = False, latex: bool = False) ->
                     "network",
                     "width",
                     "depth",
+                    "num_params",
                     "runtime",
                     "iterations",
                     "time_to_10pct",
@@ -473,6 +524,7 @@ def main(data_dirs: Sequence[Path], quiet: bool = False, latex: bool = False) ->
                     "Network",
                     "Width",
                     "Depth",
+                    "#Params",
                     "Runtime (s)",
                     "Iterations",
                     "Time to 10%",
