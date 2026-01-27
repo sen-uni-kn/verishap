@@ -1,6 +1,6 @@
 #!/bin/bash
 HERE="$(dirname "$0")"
-SHAP_VARIANT="${1-marginal}"
+SHAP_VARIANT="${1-mean-baseline}"
 
 TIMEOUT=600
 HARD_TIMEOUT=800  # +200 seconds for setup, etc
