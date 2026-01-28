@@ -1,0 +1,90 @@
+[project]
+name = "formalax"
+version = "0.0.4"
+authors = [
+    {name = "David Boetius", email = "david.boetius@uni-konstanz.de"},
+    {name = "Robin Baran Aytac", email = "robin.aytac@uni-konstanz.de"},
+    {name = "Leonard Schäffter", email = "leonard.schaeffter@uni-konstanz.de"},
+]
+readme = "README.md"
+description = "Formalax - Deep Learning Formal Methods Tools in JAX."
+requires-python = ">=3.12"
+dependencies = [
+    "jax >=0.8.0,<0.8.2",
+    "optax >=0.2.6,<0.3",
+    "jaxtyping >=0.3.3,<0.4",
+    "frozendict >=2.4.0,<3.0",
+    "ruamel.yaml >=0.18.6,<0.19",
+]
+license = {file = "LICENSE"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
+
+[project.optional-dependencies]
+test = [
+    "nox==2024.4.15",
+    "pytest>=8.2.2,<9.0",
+    "pytest-env>=1.1.3,<2.0",
+    "pytest-benchmark >=5.1.0,<6.0",
+    "pytest-cov>=6.0.0,<7.0",
+    "numpy>=2.0.0,<3.0",
+    "chex==0.1.91",
+    "flax==0.12.0",
+    "equinox==0.13.2",
+    "jaxonnxruntime==0.3.0",
+    "onnx>=1.19.1,<2.0",
+    "requests >=2.32.5,<3.0"
+]
+examples = [
+    "flax==0.12.0",
+    "torchvision==0.24.1",
+    "tqdm>=4.66.0,<5.0",
+    "jupyter>=1.1.1,<2.0",
+    "papermill>=2.6.0,<3.0",
+]
+develop = [
+    "flit>=3.9,<4.0",
+    "ruff==0.11.2",
+]
+all = ["formalax[test,examples,develop]"]
+
+[build-system]
+requires = ["uv_build>=0.8.6,<0.9.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+indent-width = 4
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B", "W", "I", "N", "ICN", "PT", "Q"]
+ignore = ["F722", "F821"]  # jax typing
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["E402"]
+"**/{tests,docs,tools}/*" = ["E402"]
+
+[tool.ruff.format]
+line-ending = "lf"
+docstring-code-format = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+env = [
+    "JAX_TRACEBACK_FILTERING=off",
+]
+addopts = [
+    "--import-mode=importlib",
+    "--benchmark-autosave",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["formalax", "tests"]
+
+[tool.coverage.html]
+directory = "coverage-html"
+title = "Formalax Coverage Report"
