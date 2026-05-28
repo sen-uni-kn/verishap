@@ -1,6 +1,7 @@
 # VeriSHAP
 
 Certified bounds on SHAP values for neural networks using branch-and-bound with linear relaxation-based bound propagation.
+This is the code of our ICML'26 paper [Verified SHAP: Provable Bounds for Exact Shapley Values of Neural Networks](https://arxiv.org/abs/2605.24084).
 
 > **Abstract**:  Shapley additive explanations (SHAP) are widely recognised as computationally intractable for neural networks, since they induce an exponential search space over the input features. In this work, we take a first step towards scaling exact SHAP computation to higher-dimensional search spaces by introducing an algorithm that leverages recent advances in neural network verification to compute arbitrarily tight exact lower and upper bounds on SHAP values for neural networks, ultimately recovering the exact SHAP values. We demonstrate that our approach scales to substantially higher-dimensional search spaces than state-of-the-art exact methods. This provides an important first step towards exact SHAP computation and establishes a principled cornerstone for evaluating statistical approximation methods on higher-dimensional search spaces.
 
@@ -97,4 +98,17 @@ Example:
 
 # Run MNIST experiments (sample 43, output class 4, 5-7 patches)
 ./experiments/vision_patches/compute_bounds.sh 43 4 mean-baseline 4096
+```
+
+## Citation
+```
+@article{boetius2026verishap,
+  title={Verified SHAP: Provable Bounds for Exact Shapley Values of Neural Networks}, 
+  author={David Boetius and Shahaf Bassan and Guy Katz and Stefan Leue and Tobias Sutter},
+  year={2026},
+  journal={CoRR},
+  volume={abs/2605.24084}
+  url={https://arxiv.org/abs/2605.24084},
+  note={To appear in ICML 2026.},
+}
 ```
