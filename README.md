@@ -106,9 +106,9 @@ Example:
   title={Verified SHAP: Provable Bounds for Exact Shapley Values of Neural Networks}, 
   author={David Boetius and Shahaf Bassan and Guy Katz and Stefan Leue and Tobias Sutter},
   year={2026},
-  journal={CoRR},
-  volume={abs/2605.24084}
-  url={https://arxiv.org/abs/2605.24084},
-  note={To appear in ICML 2026.},
+  url={https://openreview.net/forum?id=48c42LVtLx},
+  booktitle    = {{ICML}},
+  series       = {Proceedings of Machine Learning Research},
+  publisher    = {{PMLR} / OpenReview.net}
 }
 ```
